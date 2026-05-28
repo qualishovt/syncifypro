@@ -52,12 +52,16 @@ const MIME_TYPES = {
  * @param {string} options.entity      - "products" | "orders" | …
  * @param {string} options.format      - "csv" | "json" | …
  * @param {string} options.shop        - "my-store.myshopify.com"
+ * @param {string[]} [options.fields]  - column selection (undefined = all)
  */
-export async function processBulkOperation({ jobId, jsonlUrl, entity, format, shop }) {
+export async function processBulkOperation({ jobId, jsonlUrl, entity, format, shop, fields }) {
   const mimeType  = MIME_TYPES[format] ?? "application/octet-stream";
   const timestamp = new Date().toISOString().slice(0, 19).replace("T", "-").replace(/:/g, "-");
   const filename  = `${entity}-${timestamp}.${format}`;
   const r2Key     = `exports/${shop}/${filename}`;
+
+  // Columns to write — selected fields or all product columns
+  const columns = fields?.length ? fields : PRODUCT_CSV_COLUMNS;
 
   const client = getR2Client();
   const bucket = process.env.R2_BUCKET_NAME;
@@ -93,7 +97,7 @@ export async function processBulkOperation({ jobId, jsonlUrl, entity, format, sh
 
     // Write CSV header once
     if (format === "csv") {
-      buffer += PRODUCT_CSV_COLUMNS.join(",") + "\r\n";
+      buffer += columns.join(",") + "\r\n";
       headerWritten = true;
     }
 
@@ -110,7 +114,7 @@ export async function processBulkOperation({ jobId, jsonlUrl, entity, format, sh
       const variants = pendingVariants.length > 0 ? pendingVariants : [null];
       for (const variant of variants) {
         const row = normalizeProduct(currentProduct, variant);
-        buffer += formatRow(row, format) + "\r\n";
+        buffer += formatRow(row, format, columns) + "\r\n";
         rowCount++;
       }
 
@@ -210,12 +214,15 @@ async function uploadPart({ client, bucket, r2Key, uploadId, partNumber, body })
   return { partNumber, etag: res.ETag };
 }
 
-function formatRow(row, format) {
+function formatRow(row, format, columns) {
   if (format === "csv") {
-    return PRODUCT_CSV_COLUMNS.map((col) => escapeCSV(row[col] ?? "")).join(",");
+    return columns.map((col) => escapeCSV(row[col] ?? "")).join(",");
   }
   if (format === "json") {
-    return JSON.stringify(row);
+    // For JSON, only include selected columns
+    const filtered = {};
+    for (const col of columns) filtered[col] = row[col] ?? "";
+    return JSON.stringify(filtered);
   }
   return JSON.stringify(row); // fallback
 }

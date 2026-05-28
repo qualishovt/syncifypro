@@ -16,6 +16,8 @@ import { toCSV }                       from "./formats/csv.js";
 import { uploadToR2 }                  from "./delivery/r2.js";
 import { createBulkExportJob,
          markJobRunning }              from "../db/bulkExportJob.server.js";
+import { buildProductQuery,
+         buildOrderQuery }             from "./filters.js";
 // import { toExcel } from "./formats/excel.js";
 // import { toXML }   from "./formats/xml.js";
 // import { toJSON }  from "./formats/json.js";
@@ -41,6 +43,12 @@ const ENTITY_EXTRACTORS = {
 /** Entities that support bulk operations */
 const BULK_SUPPORTED = ["products"];
 
+/** Maps entity → function that builds its Shopify search query */
+const QUERY_BUILDERS = {
+  products: buildProductQuery,
+  orders:   buildOrderQuery,
+};
+
 const MIME_TYPES = {
   csv:   "text/csv",
   excel: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -65,8 +73,10 @@ const MIME_TYPES = {
  * @param {string} options.shop
  * @param {string} options.entity
  * @param {string} options.format
+ * @param {object} [options.filters] - row filters (e.g. { status: "active", vendor: "Nike" })
+ * @param {string[]} [options.fields] - column selection (defaults to all fields)
  */
-export async function runExportJob({ admin, shop, entity, format }) {
+export async function runExportJob({ admin, shop, entity, format, filters = {}, fields }) {
   const adapter = FORMAT_ADAPTERS[format];
   if (!adapter) throw new Error(`Unknown format: ${format}`);
 
@@ -75,27 +85,31 @@ export async function runExportJob({ admin, shop, entity, format }) {
   const timestamp = now.toISOString().slice(0, 19).replace("T", "-").replace(/:/g, "-");
   const filename  = `${entity}-${timestamp}.${format}`;
 
+  // Build the Shopify search query from the filter object
+  const queryBuilder = QUERY_BUILDERS[entity];
+  const query = queryBuilder ? queryBuilder(filters) : "";
+
   // ── Large store: use bulk operations ──────────────────────────────────────
   if (BULK_SUPPORTED.includes(entity)) {
     const count = await getProductCount(admin);
 
     if (count >= BULK_THRESHOLD) {
-      return runBulkExport({ admin, shop, entity, format, filename });
+      return runBulkExport({ admin, shop, entity, format, filename, query, fields });
     }
   }
 
   // ── Small store: direct fetch → format → upload ───────────────────────────
-  return runDirectExport({ admin, shop, entity, format, filename, mimeType, adapter });
+  return runDirectExport({ admin, shop, entity, format, filename, mimeType, adapter, query, fields });
 }
 
 // ─── direct ──────────────────────────────────────────────────────────────────
 
-async function runDirectExport({ admin, shop, entity, format, filename, mimeType, adapter }) {
+async function runDirectExport({ admin, shop, entity, format, filename, mimeType, adapter, query, fields }) {
   const extractor = ENTITY_EXTRACTORS[entity];
   if (!extractor) throw new Error(`Unknown entity: ${entity}`);
 
-  const rows   = await extractor(admin);
-  const buffer = adapter(rows);
+  const rows   = await extractor(admin, { query });
+  const buffer = adapter(rows, fields); // fields = column selection (undefined = all)
 
   const { signedUrl, r2Key, expiresAt } = await uploadToR2({
     buffer, filename, mimeType, shopId: shop,
@@ -106,12 +120,16 @@ async function runDirectExport({ admin, shop, entity, format, filename, mimeType
 
 // ─── bulk ─────────────────────────────────────────────────────────────────────
 
-async function runBulkExport({ admin, shop, entity, format, filename }) {
-  // 1. Create a job record in DB
-  const job = await createBulkExportJob({ shop, entity, format });
+async function runBulkExport({ admin, shop, entity, format, filename, query, fields }) {
+  // 1. Create a job record in DB — store the selected fields so the
+  //    worker knows which columns to write when the data comes back.
+  const job = await createBulkExportJob({
+    shop, entity, format,
+    fields: fields ? fields.join(",") : null,
+  });
 
-  // 2. Submit the bulk operation to Shopify
-  const { bulkOperationId } = await submitProductsBulkOperation(admin);
+  // 2. Submit the bulk operation to Shopify with the row filter applied
+  const { bulkOperationId } = await submitProductsBulkOperation(admin, { query });
 
   // 3. Store the bulk operation ID so the webhook can find this job
   await markJobRunning({ id: job.id, bulkOperationId });

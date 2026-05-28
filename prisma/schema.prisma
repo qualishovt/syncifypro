@@ -40,6 +40,7 @@ model BulkExportJob {
   format          String
   status          String    @default("pending")
   bulkOperationId String?
+  fields          String?   // comma-separated column selection (null = all)
   r2Key           String?
   signedUrl       String?
   signedUrlExpiry DateTime?

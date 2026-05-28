@@ -12,6 +12,7 @@
  *   status          String   @default("pending")
  *   // pending | running | complete | failed
  *   bulkOperationId String?  // Shopify bulk operation GID
+ *   fields          String?  // comma-separated column selection (null = all)
  *   r2Key           String?
  *   signedUrl       String?
  *   signedUrlExpiry DateTime?
@@ -32,9 +33,9 @@ import db from "../db.server.js";
 /**
  * Create a new pending bulk export job record.
  */
-export async function createBulkExportJob({ shop, entity, format }) {
+export async function createBulkExportJob({ shop, entity, format, fields = null }) {
   return db.bulkExportJob.create({
-    data: { shop, entity, format, status: "pending" },
+    data: { shop, entity, format, fields, status: "pending" },
   });
 }
 

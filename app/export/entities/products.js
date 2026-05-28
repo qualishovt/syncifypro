@@ -1,15 +1,17 @@
 /**
  * export/entities/products.js
  *
- * Fetches all products from Shopify (paginated) and returns
- * them as normalized flat rows ready for any format adapter.
+ * Fetches products from Shopify (paginated) and returns them as
+ * normalized flat rows. Accepts an optional Shopify search query
+ * string to filter which products are fetched.
  */
 
 import { normalizeProduct } from "../normalizer.js";
 
+// $query filters which products Shopify returns (empty = all products)
 const PRODUCTS_QUERY = `#graphql
-  query GetProducts($first: Int!, $after: String) {
-    products(first: $first, after: $after) {
+  query GetProducts($first: Int!, $after: String, $query: String) {
+    products(first: $first, after: $after, query: $query) {
       pageInfo {
         hasNextPage
         endCursor
@@ -56,20 +58,27 @@ const PRODUCTS_QUERY = `#graphql
 `;
 
 /**
- * Fetch all products from the store, paginating automatically.
- * Returns an array of normalized flat row objects.
+ * Fetch products from the store, paginating automatically.
  *
  * @param {import("@shopify/shopify-app-remix/server").AdminApiContext} admin
+ * @param {object} [options]
+ * @param {string} [options.query] - Shopify search query string (e.g. "status:active vendor:Nike")
  * @returns {Promise<object[]>}
  */
-export async function extractProducts(admin) {
+export async function extractProducts(admin, { query = "" } = {}) {
   const rows = [];
   let cursor = null;
   let hasNextPage = true;
 
   while (hasNextPage) {
     const response = await admin.graphql(PRODUCTS_QUERY, {
-      variables: { first: 250, after: cursor },
+      variables: {
+        first: 250,
+        after: cursor,
+        // Pass undefined (not "") when no filter — Shopify treats
+        // an empty string as a valid-but-empty query in some versions
+        query: query || undefined,
+      },
     });
 
     const { data, errors } = await response.json();

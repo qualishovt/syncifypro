@@ -67,6 +67,7 @@ export async function action({ request }) {
     entity:   job.entity,
     format:   job.format,
     shop,
+    fields:   job.fields ? job.fields.split(",") : undefined,
   }).catch((err) => {
     console.error(`[bulkOperationWorker] job ${job.id} failed:`, err.message);
   });

@@ -41,57 +41,68 @@ const CURRENT_BULK_OPERATION = `#graphql
 `;
 
 /**
- * The bulk query — fetches all products with variants.
- * Shopify's bulk operation wraps this in a connection automatically.
- * Note: bulk queries use a different syntax from regular GraphQL —
- * no pagination args needed, Shopify handles that.
+ * Builds the bulk query for products with an optional filter.
+ * In bulk operations, the row filter goes in the `query:` argument
+ * on the products connection (same search syntax as regular queries).
+ *
+ * @param {string} [filterQuery] - Shopify search string (e.g. "status:active")
+ * @returns {string} the full bulk GraphQL query
  */
-const PRODUCTS_BULK_QUERY = `
-  {
-    products {
-      id
-      title
-      handle
-      status
-      descriptionHtml
-      vendor
-      productType
-      tags
-      createdAt
-      updatedAt
-      images(first: 1) {
-        url
-      }
-      variants {
+function buildProductsBulkQuery(filterQuery = "") {
+  // Escape double quotes in the filter and embed it if present
+  const queryArg = filterQuery
+    ? `(query: "${filterQuery.replace(/"/g, '\\"')}")`
+    : "";
+
+  return `
+    {
+      products${queryArg} {
         id
         title
-        sku
-        price
-        compareAtPrice
-        inventoryQuantity
-        barcode
-        taxable
-        inventoryItem {
-          measurement {
-            weight {
-              value
-              unit
+        handle
+        status
+        descriptionHtml
+        vendor
+        productType
+        tags
+        createdAt
+        updatedAt
+        images(first: 1) {
+          url
+        }
+        variants {
+          id
+          title
+          sku
+          price
+          compareAtPrice
+          inventoryQuantity
+          barcode
+          taxable
+          inventoryItem {
+            measurement {
+              weight {
+                value
+                unit
+              }
             }
           }
         }
       }
     }
-  }
-`;
+  `;
+}
 
 /**
  * Submit a bulk operation for products export.
  * Checks if another bulk operation is already running first.
  *
  * @param {import("@shopify/shopify-app-remix/server").AdminApiContext} admin
+ * @param {object} [options]
+ * @param {string} [options.query] - Shopify search filter (e.g. "status:active vendor:Nike")
  * @returns {Promise<{ bulkOperationId: string }>}
  */
-export async function submitProductsBulkOperation(admin) {
+export async function submitProductsBulkOperation(admin, { query = "" } = {}) {
   // Check if there's already a bulk operation running
   const currentRes = await admin.graphql(CURRENT_BULK_OPERATION);
   const { data: currentData } = await currentRes.json();
@@ -104,9 +115,9 @@ export async function submitProductsBulkOperation(admin) {
     );
   }
 
-  // Submit the bulk operation
+  // Submit the bulk operation with the filter applied
   const res = await admin.graphql(BULK_OPERATION_RUN, {
-    variables: { query: PRODUCTS_BULK_QUERY },
+    variables: { query: buildProductsBulkQuery(query) },
   });
 
   const { data } = await res.json();

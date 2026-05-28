@@ -9,8 +9,8 @@
 import { normalizeOrder } from "../normalizer.js";
 
 const ORDERS_QUERY = `#graphql
-  query GetOrders($first: Int!, $after: String) {
-    orders(first: $first, after: $after, query: "status:any") {
+  query GetOrders($first: Int!, $after: String, $query: String) {
+    orders(first: $first, after: $after, query: $query) {
       pageInfo {
         hasNextPage
         endCursor
@@ -102,20 +102,28 @@ const ORDERS_QUERY = `#graphql
  * @param {import("@shopify/shopify-app-remix/server").AdminApiContext} admin
  * @returns {Promise<object[]>}
  */
-export async function extractOrders(admin) {
+export async function extractOrders(admin, { query = "status:any" } = {}) {
   const rows = [];
   let cursor = null;
   let hasNextPage = true;
 
   while (hasNextPage) {
     const response = await admin.graphql(ORDERS_QUERY, {
-      variables: { first: 250, after: cursor },
+      variables: { first: 250, after: cursor, query },
     });
 
     const { data, errors } = await response.json();
 
+    // Shopify returns HTTP 200 with both data AND errors when fields are
+    // redacted due to Protected Customer Data. In that case `data` is still
+    // usable (PII fields just come back null), so we log a warning rather
+    // than throwing. We only throw when there's no usable data at all.
     if (errors?.length) {
-      throw new Error(`Shopify API error: ${errors.map((e) => e.message).join(", ")}`);
+      const messages = errors.map((e) => e.message).join(", ");
+      if (!data?.orders) {
+        throw new Error(`Shopify API error: ${messages}`);
+      }
+      console.warn(`[orders export] Some fields redacted by Shopify: ${messages}`);
     }
 
     const { nodes, pageInfo } = data.orders;
