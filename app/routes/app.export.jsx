@@ -179,7 +179,6 @@ export default function ExportPage() {
             <a
               href={downloadResult.signedUrl}
               download={downloadResult.filename}
-              target="_blank"
               rel="noreferrer"
               style={downloadLink}
             >

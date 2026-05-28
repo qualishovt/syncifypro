@@ -36,15 +36,31 @@ export const PRODUCT_CSV_COLUMNS = [
 /**
  * Serialize rows to a CSV Buffer.
  *
- * @param {object[]} rows      - normalized product rows
- * @param {string[]} [columns] - column order (defaults to PRODUCT_CSV_COLUMNS)
+ * If `columns` is omitted, the column list is derived from the keys
+ * of the first row — so the same function works for products, orders,
+ * or any other entity without hardcoding a column list per entity.
+ *
+ * @param {object[]} rows      - normalized rows (any entity)
+ * @param {string[]} [columns] - optional explicit column order
  * @returns {Buffer}
  */
-export function toCSV(rows, columns = PRODUCT_CSV_COLUMNS) {
-  const lines = [columns.join(",")];
+export function toCSV(rows, columns) {
+  // Derive columns from the data when not explicitly provided.
+  // Scan all rows (not just the first) so we don't miss keys that
+  // only appear on some rows — e.g. an order with no line items.
+  let cols = columns;
+  if (!cols) {
+    const keySet = new Set();
+    for (const row of rows) {
+      for (const key of Object.keys(row)) keySet.add(key);
+    }
+    cols = [...keySet];
+  }
+
+  const lines = [cols.join(",")];
 
   for (const row of rows) {
-    const values = columns.map((col) => escapeCSV(row[col] ?? ""));
+    const values = cols.map((col) => escapeCSV(row[col] ?? ""));
     lines.push(values.join(","));
   }
 
