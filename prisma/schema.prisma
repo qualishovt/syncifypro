@@ -32,3 +32,22 @@ model Session {
   refreshToken        String?
   refreshTokenExpires DateTime?
 }
+
+model BulkExportJob {
+  id              String    @id @default(cuid())
+  shop            String
+  entity          String
+  format          String
+  status          String    @default("pending")
+  bulkOperationId String?
+  r2Key           String?
+  signedUrl       String?
+  signedUrlExpiry DateTime?
+  rowCount        Int?
+  errorMessage    String?
+  createdAt       DateTime  @default(now())
+  completedAt     DateTime?
+
+  @@index([shop])
+  @@index([bulkOperationId])
+}
