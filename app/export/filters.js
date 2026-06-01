@@ -76,6 +76,91 @@ export function buildOrderQuery(filters = {}) {
   return clauses.join(" ");
 }
 
+/**
+ * Build a Shopify customer search query string.
+ *
+ * Supported filters:
+ *   email            — partial email match
+ *   state            — "enabled" | "disabled" | "invited" | "declined"
+ *   tag              — single customer tag
+ *   country          — billing/default address country
+ *   createdAtMin/Max — ISO date strings
+ *   updatedAtMin/Max — ISO date strings
+ */
+export function buildCustomerQuery(filters = {}) {
+  const clauses = [];
+
+  if (filters.email)   clauses.push(`email:${quote(filters.email)}`);
+  if (filters.state)   clauses.push(`state:${filters.state}`);
+  if (filters.tag)     clauses.push(`tag:${quote(filters.tag)}`);
+  if (filters.country) clauses.push(`country:${quote(filters.country)}`);
+
+  if (filters.createdAtMin) clauses.push(`created_at:>=${filters.createdAtMin}`);
+  if (filters.createdAtMax) clauses.push(`created_at:<=${filters.createdAtMax}`);
+  if (filters.updatedAtMin) clauses.push(`updated_at:>=${filters.updatedAtMin}`);
+  if (filters.updatedAtMax) clauses.push(`updated_at:<=${filters.updatedAtMax}`);
+
+  return clauses.join(" ");
+}
+
+/**
+ * Build a Shopify collection search query string.
+ *
+ * Supported filters:
+ *   title             — partial title match
+ *   collectionType    — "smart" | "custom"
+ *   updatedAtMin/Max  — ISO date strings
+ */
+export function buildCollectionQuery(filters = {}) {
+  const clauses = [];
+
+  if (filters.title)          clauses.push(`title:${quote(filters.title)}`);
+  if (filters.collectionType) clauses.push(`collection_type:${filters.collectionType}`);
+
+  if (filters.updatedAtMin) clauses.push(`updated_at:>=${filters.updatedAtMin}`);
+  if (filters.updatedAtMax) clauses.push(`updated_at:<=${filters.updatedAtMax}`);
+
+  return clauses.join(" ");
+}
+
+/**
+ * Build a Shopify discount search query string.
+ *
+ * Supported filters:
+ *   status — "active" | "expired" | "scheduled"
+ *   title  — partial title match
+ */
+export function buildDiscountQuery(filters = {}) {
+  const clauses = [];
+
+  if (filters.status) clauses.push(`status:${filters.status}`);
+  if (filters.title)  clauses.push(`title:${quote(filters.title)}`);
+
+  return clauses.join(" ");
+}
+
+/**
+ * Build a Shopify search query for content entities (pages, blogs,
+ * articles). All three share the same useful filter surface.
+ *
+ * Supported filters:
+ *   title             — partial title match
+ *   createdAtMin/Max  — ISO date strings
+ *   updatedAtMin/Max  — ISO date strings
+ */
+export function buildContentQuery(filters = {}) {
+  const clauses = [];
+
+  if (filters.title) clauses.push(`title:${quote(filters.title)}`);
+
+  if (filters.createdAtMin) clauses.push(`created_at:>=${filters.createdAtMin}`);
+  if (filters.createdAtMax) clauses.push(`created_at:<=${filters.createdAtMax}`);
+  if (filters.updatedAtMin) clauses.push(`updated_at:>=${filters.updatedAtMin}`);
+  if (filters.updatedAtMax) clauses.push(`updated_at:<=${filters.updatedAtMax}`);
+
+  return clauses.join(" ");
+}
+
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 /**

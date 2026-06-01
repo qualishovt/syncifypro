@@ -1,6 +1,26 @@
 {
+  "permissions": {
+    "allow": [
+      "mcp__shopify-dev-mcp__validate_graphql_codeblocks",
+      "Bash(npm install *)",
+      "Bash(node -e \"console.log\\(typeof require\\('zlib'\\).deflateRawSync\\)\")",
+      "Bash(node --input-type=module -e ' *)",
+      "Bash(python3 -c ' *)",
+      "PowerShell(Add-Type -AssemblyName System.IO.Compression.FileSystem; $z = [System.IO.Compression.ZipFile]::OpenRead\\(\"$env:TEMP\\\\test.xlsx\"\\); $z.Entries | ForEach-Object { $_.FullName }; Write-Output \"--- sheet1 ---\"; $e = $z.GetEntry\\(\"xl/worksheets/sheet1.xml\"\\); $r = New-Object System.IO.StreamReader\\($e.Open\\(\\)\\); $r.ReadToEnd\\(\\); $r.Close\\(\\); $z.Dispose\\(\\))",
+      "Bash(git rm *)",
+      "Bash(node --check app/workers/bulkOperationWorker.js)",
+      "Bash(node --check app/export/entities/bulk.js)",
+      "Bash(node --check app/export/formats/excel.js)",
+      "Bash(node --check app/export/fieldLists.js)",
+      "Bash(node --check app/export/exportJob.js)",
+      "Bash(npm run *)",
+      "Bash(grep -A6 \"formats\\\\\\\\\\\\\\\\excel.js\\\\|formats\\\\\\\\\\\\\\\\json.js\\\\|formats\\\\\\\\\\\\\\\\xml.js\")",
+      "mcp__shopify-dev-mcp__search_docs_chunks",
+      "mcp__shopify-dev-mcp__validate_component_codeblocks"
+    ]
+  },
+  "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": [
     "shopify-dev-mcp"
-  ],
-  "enableAllProjectMcpServers": true
+  ]
 }

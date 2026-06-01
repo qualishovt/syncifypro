@@ -27,8 +27,8 @@ import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { createInterface } from "readline";
 import { Readable }        from "stream";
 
-import { normalizeProduct } from "../export/normalizer.js";
-import { PRODUCT_CSV_COLUMNS, toCSV } from "../export/formats/csv.js";
+import { BULK_RECONCILE } from "../export/entities/bulk.js";
+import { FIELDS_BY_ENTITY } from "../export/fieldLists.js";
 import { markJobComplete, markJobFailed } from "../db/bulkExportJob.server.js";
 
 /** Minimum R2 multipart chunk size — 5MB (R2's minimum) */
@@ -60,8 +60,12 @@ export async function processBulkOperation({ jobId, jsonlUrl, entity, format, sh
   const filename  = `${entity}-${timestamp}.${format}`;
   const r2Key     = `exports/${shop}/${filename}`;
 
-  // Columns to write — selected fields or all product columns
-  const columns = fields?.length ? fields : PRODUCT_CSV_COLUMNS;
+  const reconcile = BULK_RECONCILE[entity];
+  if (!reconcile) throw new Error(`No bulk reconcile config for entity: ${entity}`);
+
+  // Columns to write — selected fields or the entity's full column list
+  const columns = fields?.length ? fields : (FIELDS_BY_ENTITY[entity] ?? []);
+  const fmt = makeFormatter(format, columns);
 
   const client = getR2Client();
   const bucket = process.env.R2_BUCKET_NAME;
@@ -91,65 +95,63 @@ export async function processBulkOperation({ jobId, jsonlUrl, entity, format, sh
 
     const parts       = [];
     let   partNumber  = 1;
-    let   buffer      = "";    // accumulates CSV rows until chunk is full
+    let   buffer      = fmt.prefix;  // header / opening bracket / xml root
     let   rowCount    = 0;
-    let   headerWritten = false;
 
-    // Write CSV header once
-    if (format === "csv") {
-      buffer += columns.join(",") + "\r\n";
-      headerWritten = true;
-    }
+    // Append one formatted row, flushing a part once we have enough bytes.
+    const emitRow = async (row) => {
+      buffer += fmt.separator(rowCount) + fmt.encode(row);
+      rowCount++;
 
-    // Shopify JSONL: each line is one node (product or variant).
-    // Child nodes (variants) have a __parentId field linking to their product.
-    // We collect variants under their product then normalize when the next
-    // product line appears (i.e. we flush the previous product's rows).
-    let currentProduct = null;
-    const pendingVariants = [];
-
-    async function flushProduct() {
-      if (!currentProduct) return;
-
-      const variants = pendingVariants.length > 0 ? pendingVariants : [null];
-      for (const variant of variants) {
-        const row = normalizeProduct(currentProduct, variant);
-        buffer += formatRow(row, format, columns) + "\r\n";
-        rowCount++;
-      }
-
-      // Upload a part when we've accumulated enough data
       if (Buffer.byteLength(buffer, "utf8") >= CHUNK_SIZE) {
         const part = await uploadPart({ client, bucket, r2Key, uploadId, partNumber, body: buffer });
         parts.push(part);
         partNumber++;
         buffer = "";
       }
+    };
+
+    if (reconcile.strategy === "parentChild") {
+      // Shopify JSONL: a parent line, then its child lines (each carrying
+      // __parentId). Collect children under the current parent, then emit
+      // normalize(parent, child) rows when the next parent line appears.
+      let currentParent = null;
+      const pendingChildren = [];
+
+      const flushParent = async () => {
+        if (!currentParent) return;
+        const children = pendingChildren.length > 0 ? pendingChildren : [null];
+        for (const child of children) {
+          await emitRow(reconcile.normalize(currentParent, child));
+        }
+      };
+
+      for await (const line of rl) {
+        if (!line.trim()) continue;
+        let node;
+        try { node = JSON.parse(line); } catch { continue; }
+
+        if (node.__parentId) {
+          pendingChildren.push(node);
+        } else {
+          await flushParent();
+          currentParent = node;
+          pendingChildren.length = 0;
+        }
+      }
+      await flushParent();
+    } else {
+      // "flat": one JSONL node = one row (no child lines).
+      for await (const line of rl) {
+        if (!line.trim()) continue;
+        let node;
+        try { node = JSON.parse(line); } catch { continue; }
+        await emitRow(reconcile.normalize(node));
+      }
     }
 
-    for await (const line of rl) {
-      if (!line.trim()) continue;
-
-      let node;
-      try {
-        node = JSON.parse(line);
-      } catch {
-        continue; // skip malformed lines
-      }
-
-      if (node.__parentId) {
-        // This is a variant — attach to current product
-        pendingVariants.push(node);
-      } else {
-        // New product — flush previous product first
-        await flushProduct();
-        currentProduct = node;
-        pendingVariants.length = 0;
-      }
-    }
-
-    // Flush the last product
-    await flushProduct();
+    // Close the document (json array bracket / xml root); no-op for csv.
+    buffer += fmt.suffix;
 
     // ── 3. Upload remaining buffer as final part ─────────────────────────────
     // R2 requires at least one part — even if everything fit in the buffer
@@ -214,23 +216,71 @@ async function uploadPart({ client, bucket, r2Key, uploadId, partNumber, body })
   return { partNumber, etag: res.ETag };
 }
 
-function formatRow(row, format, columns) {
-  if (format === "csv") {
-    return columns.map((col) => escapeCSV(row[col] ?? "")).join(",");
-  }
+/**
+ * Build a streaming serializer for a format. The worker writes
+ * `prefix`, then `separator(index) + encode(row)` per row, then `suffix`.
+ * This keeps the streamed output identical in shape to the direct-export
+ * adapters: CSV with a header, a single JSON array, or an XML <rows> doc.
+ */
+function makeFormatter(format, columns) {
   if (format === "json") {
-    // For JSON, only include selected columns
-    const filtered = {};
-    for (const col of columns) filtered[col] = row[col] ?? "";
-    return JSON.stringify(filtered);
+    return {
+      prefix: "[",
+      separator: (i) => (i === 0 ? "\n" : ",\n"),
+      encode: (row) => {
+        const obj = {};
+        for (const col of columns) obj[col] = row[col] ?? "";
+        return JSON.stringify(obj);
+      },
+      suffix: "\n]",
+    };
   }
-  return JSON.stringify(row); // fallback
+
+  if (format === "xml") {
+    return {
+      prefix: '<?xml version="1.0" encoding="UTF-8"?>\n<rows>',
+      separator: () => "\n",
+      encode: (row) => {
+        const cells = columns
+          .map((col) => {
+            const tag = xmlElementName(col);
+            return `    <${tag}>${escapeXML(row[col] ?? "")}</${tag}>`;
+          })
+          .join("\n");
+        return `  <row>\n${cells}\n  </row>`;
+      },
+      suffix: "\n</rows>",
+    };
+  }
+
+  // csv (default): header is the prefix, each row preceded by a newline
+  return {
+    prefix: columns.join(","),
+    separator: () => "\r\n",
+    encode: (row) => columns.map((col) => escapeCSV(row[col] ?? "")).join(","),
+    suffix: "",
+  };
 }
 
 function escapeCSV(value) {
   const str = String(value);
   if (/[",\r\n]/.test(str)) return `"${str.replace(/"/g, '""')}"`;
   return str;
+}
+
+function escapeXML(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function xmlElementName(col) {
+  let name = String(col).replace(/[^a-zA-Z0-9_.-]/g, "_");
+  if (!/^[a-zA-Z_]/.test(name)) name = `_${name}`;
+  return name;
 }
 
 function getR2Client() {

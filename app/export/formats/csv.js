@@ -9,6 +9,8 @@
  * for the CSV shape your users will see and re-import.
  */
 
+import { resolveColumns } from "./columns.js";
+
 export const PRODUCT_CSV_COLUMNS = [
   "product_id",
   "title",
@@ -45,17 +47,7 @@ export const PRODUCT_CSV_COLUMNS = [
  * @returns {Buffer}
  */
 export function toCSV(rows, columns) {
-  // Derive columns from the data when not explicitly provided.
-  // Scan all rows (not just the first) so we don't miss keys that
-  // only appear on some rows — e.g. an order with no line items.
-  let cols = columns;
-  if (!cols) {
-    const keySet = new Set();
-    for (const row of rows) {
-      for (const key of Object.keys(row)) keySet.add(key);
-    }
-    cols = [...keySet];
-  }
+  const cols = resolveColumns(rows, columns);
 
   const lines = [cols.join(",")];
 

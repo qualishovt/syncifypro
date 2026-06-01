@@ -10,43 +10,67 @@
 
 import { extractProducts }             from "./entities/products.js";
 import { extractOrders }               from "./entities/orders.js";
-import { submitProductsBulkOperation,
-         getProductCount }             from "./entities/productsBulk.js";
+import { extractCustomers }            from "./entities/customers.js";
+import { extractCollections }          from "./entities/collections.js";
+import { extractDiscounts }            from "./entities/discounts.js";
+import { extractPages }                from "./entities/pages.js";
+import { extractBlogs }                from "./entities/blogs.js";
+import { extractArticles }             from "./entities/articles.js";
+import { submitBulkOperation,
+         getEntityCount,
+         BULK_ENTITIES }               from "./entities/bulk.js";
 import { toCSV }                       from "./formats/csv.js";
+import { toXML }                       from "./formats/xml.js";
+import { toJSON }                      from "./formats/json.js";
+import { toExcel }                     from "./formats/excel.js";
 import { uploadToR2 }                  from "./delivery/r2.js";
 import { createBulkExportJob,
          markJobRunning }              from "../db/bulkExportJob.server.js";
 import { buildProductQuery,
-         buildOrderQuery }             from "./filters.js";
-// import { toExcel } from "./formats/excel.js";
-// import { toXML }   from "./formats/xml.js";
-// import { toJSON }  from "./formats/json.js";
+         buildOrderQuery,
+         buildCustomerQuery,
+         buildCollectionQuery,
+         buildDiscountQuery,
+         buildContentQuery }           from "./filters.js";
 
 /** Threshold above which we switch to bulk operations */
 const BULK_THRESHOLD = 10_000;
 
 const FORMAT_ADAPTERS = {
-  csv: toCSV,
-  // excel: toExcel,
-  // xml:   toXML,
-  // json:  toJSON,
+  csv:   toCSV,
+  xml:   toXML,
+  json:  toJSON,
+  excel: toExcel,
 };
+
+/**
+ * Formats the streaming bulk worker can produce line-by-line. Excel is
+ * built as a single in-memory workbook, so large-store exports in Excel
+ * stay on the direct path instead of routing to bulk operations.
+ */
+const STREAMABLE_FORMATS = ["csv", "xml", "json"];
 
 const ENTITY_EXTRACTORS = {
-  products: extractProducts,
-  orders:   extractOrders,
-  // collections: extractCollections,
-  // discounts:   extractDiscounts,
-  // customers:   extractCustomers,
+  products:    extractProducts,
+  orders:      extractOrders,
+  customers:   extractCustomers,
+  collections: extractCollections,
+  discounts:   extractDiscounts,
+  pages:       extractPages,
+  blogs:       extractBlogs,
+  articles:    extractArticles,
 };
-
-/** Entities that support bulk operations */
-const BULK_SUPPORTED = ["products"];
 
 /** Maps entity → function that builds its Shopify search query */
 const QUERY_BUILDERS = {
-  products: buildProductQuery,
-  orders:   buildOrderQuery,
+  products:    buildProductQuery,
+  orders:      buildOrderQuery,
+  customers:   buildCustomerQuery,
+  collections: buildCollectionQuery,
+  discounts:   buildDiscountQuery,
+  pages:       buildContentQuery,
+  blogs:       buildContentQuery,
+  articles:    buildContentQuery,
 };
 
 const MIME_TYPES = {
@@ -90,8 +114,10 @@ export async function runExportJob({ admin, shop, entity, format, filters = {}, 
   const query = queryBuilder ? queryBuilder(filters) : "";
 
   // ── Large store: use bulk operations ──────────────────────────────────────
-  if (BULK_SUPPORTED.includes(entity)) {
-    const count = await getProductCount(admin);
+  // Only stream-friendly formats route to bulk; Excel is built in memory,
+  // so it always takes the direct path (see STREAMABLE_FORMATS).
+  if (BULK_ENTITIES.includes(entity) && STREAMABLE_FORMATS.includes(format)) {
+    const count = await getEntityCount(admin, entity);
 
     if (count >= BULK_THRESHOLD) {
       return runBulkExport({ admin, shop, entity, format, filename, query, fields });
@@ -109,7 +135,7 @@ async function runDirectExport({ admin, shop, entity, format, filename, mimeType
   if (!extractor) throw new Error(`Unknown entity: ${entity}`);
 
   const rows   = await extractor(admin, { query });
-  const buffer = adapter(rows, fields); // fields = column selection (undefined = all)
+  const buffer = await adapter(rows, fields); // fields = column selection (undefined = all)
 
   const { signedUrl, r2Key, expiresAt } = await uploadToR2({
     buffer, filename, mimeType, shopId: shop,
@@ -129,7 +155,7 @@ async function runBulkExport({ admin, shop, entity, format, filename, query, fie
   });
 
   // 2. Submit the bulk operation to Shopify with the row filter applied
-  const { bulkOperationId } = await submitProductsBulkOperation(admin, { query });
+  const { bulkOperationId } = await submitBulkOperation(admin, { entity, query });
 
   // 3. Store the bulk operation ID so the webhook can find this job
   await markJobRunning({ id: job.id, bulkOperationId });
