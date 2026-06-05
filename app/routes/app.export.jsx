@@ -316,13 +316,14 @@ export default function ExportPage() {
           <s-stack direction="block" gap="base">
             <div style={entityGrid}>
               {ENTITIES.map((e) => (
-                <PolarisCheckbox
-                  key={e}
-                  label={capitalize(e)}
-                  checked={entityState[e].enabled}
-                  onChange={(v) => setEntityEnabled(e, v)}
-                  disabled={isExporting || isPolling}
-                />
+                <div key={e} style={entityBox}>
+                  <PolarisCheckbox
+                    label={capitalize(e)}
+                    checked={entityState[e].enabled}
+                    onChange={(v) => setEntityEnabled(e, v)}
+                    disabled={isExporting || isPolling}
+                  />
+                </div>
               ))}
             </div>
 
@@ -673,6 +674,9 @@ const filterGrid = {
 const entityGrid = {
   display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
   gap: ".5rem",
+};
+const entityBox = {
+  border: "1px solid #c9cccf", borderRadius: 8, padding: ".5rem .65rem",
 };
 const columnsGrid = {
   display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
