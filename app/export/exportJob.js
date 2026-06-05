@@ -22,7 +22,8 @@ import { submitBulkOperation,
 import { toCSV }                       from "./formats/csv.js";
 import { toXML }                       from "./formats/xml.js";
 import { toJSON }                      from "./formats/json.js";
-import { toExcel }                     from "./formats/excel.js";
+import { toExcel, toExcelWorkbook }    from "./formats/excel.js";
+import { zipParts }                    from "./formats/zip.js";
 import { uploadToR2 }                  from "./delivery/r2.js";
 import { createBulkExportJob,
          markJobRunning }              from "../db/bulkExportJob.server.js";
@@ -78,6 +79,14 @@ const MIME_TYPES = {
   excel: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   xml:   "application/xml",
   json:  "application/json",
+  zip:   "application/zip",
+};
+
+const EXTENSION = {
+  csv:   "csv",
+  excel: "xlsx",
+  xml:   "xml",
+  json:  "json",
 };
 
 /**
@@ -162,4 +171,81 @@ async function runBulkExport({ admin, shop, entity, format, filename, query, fie
 
   // 4. Return immediately — the rest happens in the webhook + worker
   return { mode: "bulk", jobId: job.id };
+}
+
+// ─── multi-entity ────────────────────────────────────────────────────────────
+
+/**
+ * Export multiple entities in one job and bundle them together.
+ *
+ *   excel        → one multi-sheet workbook (one sheet per entity)
+ *   csv/xml/json → one zip containing `<entity>.<ext>` per entity
+ *
+ * Always uses the direct path — Shopify allows only one bulk operation
+ * at a time, so multi-entity jobs can't chain bulk ops cleanly.
+ *
+ * @param {object} options
+ * @param {import("@shopify/shopify-app-remix/server").AdminApiContext} options.admin
+ * @param {string} options.shop
+ * @param {{entity: string, filters?: object, fields?: string[]}[]} options.specs
+ * @param {string} options.format
+ */
+export async function runMultiEntityExport({ admin, shop, specs, format }) {
+  if (!Array.isArray(specs) || specs.length === 0) {
+    throw new Error("At least one entity must be selected.");
+  }
+  if (format !== "excel" && !FORMAT_ADAPTERS[format]) {
+    throw new Error(`Unknown format: ${format}`);
+  }
+  for (const s of specs) {
+    if (!ENTITY_EXTRACTORS[s.entity]) throw new Error(`Unknown entity: ${s.entity}`);
+  }
+
+  // 1. Extract every entity (sequential keeps API load bounded).
+  const results = [];
+  for (const spec of specs) {
+    const buildQuery = QUERY_BUILDERS[spec.entity];
+    const query      = buildQuery ? buildQuery(spec.filters ?? {}) : "";
+    const extractor  = ENTITY_EXTRACTORS[spec.entity];
+    const rows       = await extractor(admin, { query });
+    results.push({ entity: spec.entity, rows, fields: spec.fields });
+  }
+
+  // 2. Bundle into a single deliverable.
+  const timestamp = new Date().toISOString().slice(0, 19).replace("T", "-").replace(/:/g, "-");
+  let buffer, filename, mimeType;
+
+  if (format === "excel") {
+    buffer = toExcelWorkbook(
+      results.map((r) => ({
+        name:    capitalize(r.entity),
+        rows:    r.rows,
+        columns: r.fields,
+      })),
+    );
+    filename = `export-${timestamp}.xlsx`;
+    mimeType = MIME_TYPES.excel;
+  } else {
+    const adapter = FORMAT_ADAPTERS[format];
+    const ext     = EXTENSION[format];
+    buffer = zipParts(
+      results.map((r) => ({
+        name: `${r.entity}.${ext}`,
+        data: adapter(r.rows, r.fields),
+      })),
+    );
+    filename = `export-${timestamp}.zip`;
+    mimeType = MIME_TYPES.zip;
+  }
+
+  // 3. Upload + return signed URL.
+  const { signedUrl, r2Key, expiresAt } = await uploadToR2({
+    buffer, filename, mimeType, shopId: shop,
+  });
+
+  return { mode: "direct", signedUrl, filename, expiresAt, r2Key };
+}
+
+function capitalize(s) {
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }

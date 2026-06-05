@@ -36,11 +36,19 @@ model Session {
 model BulkExportJob {
   id              String    @id @default(cuid())
   shop            String
+  // For multi-entity jobs `entity` is a comma-list (e.g. "products,orders")
+  // used for display only; the structured spec lives in `spec`.
   entity          String
   format          String
   status          String    @default("pending")
   bulkOperationId String?
-  fields          String?   // comma-separated column selection (null = all)
+  // Legacy single-entity column selection; multi-entity jobs use `spec`.
+  fields          String?
+  // JSON-serialised array of { entity, filters, fields } — the source of
+  // truth for multi-entity jobs. Null for legacy single-entity records.
+  spec            String?
+  // Optional user-chosen filename (without extension).
+  filename        String?
   r2Key           String?
   signedUrl       String?
   signedUrlExpiry DateTime?

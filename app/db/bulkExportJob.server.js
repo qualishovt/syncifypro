@@ -33,9 +33,20 @@ import db from "../db.server.js";
 /**
  * Create a new pending bulk export job record.
  */
-export async function createBulkExportJob({ shop, entity, format, fields = null }) {
+/**
+ * Create a new pending bulk export job record.
+ * `spec` is a JSON array of `{ entity, filters, fields }` (multi-entity);
+ * `entity` is a comma-list of the entity slugs for display.
+ */
+export async function createBulkExportJob({
+  shop, entity, format, fields = null, spec = null, filename = null,
+}) {
   return db.bulkExportJob.create({
-    data: { shop, entity, format, fields, status: "pending" },
+    data: {
+      shop, entity, format, fields, status: "pending",
+      spec:     spec ? JSON.stringify(spec) : null,
+      filename: filename ?? null,
+    },
   });
 }
 
