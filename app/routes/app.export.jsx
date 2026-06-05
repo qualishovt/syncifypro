@@ -222,6 +222,21 @@ export default function ExportPage() {
   const pollFetcher = useFetcher();
   const [pollingJobId, setPollingJobId] = useState(null);
 
+  // Keep the format popover's width in sync with its full-width trigger
+  // button. s-popover has no "match trigger" option, so we measure the
+  // trigger and feed its pixel width into the popover's inlineSize.
+  const formatTriggerRef = useRef(null);
+  const [formatTriggerWidth, setFormatTriggerWidth] = useState(null);
+  useEffect(() => {
+    const el = formatTriggerRef.current;
+    if (!el) return;
+    const update = () => setFormatTriggerWidth(el.offsetWidth);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   const isExporting = fetcher.state !== "idle";
   const result = fetcher.data;
 
@@ -296,56 +311,20 @@ export default function ExportPage() {
     <s-page heading="Export">
       <s-stack direction="block" gap="base">
 
-        {/* ── New export form ──────────────────────────────────────── */}
-        <s-section heading="New export">
+        {/* ── Entities card ────────────────────────────────────────── */}
+        <s-section heading="Entities to export">
           <s-stack direction="block" gap="base">
-
-            {/* Format */}
-            <label style={{ ...labelStyle, maxWidth: 280 }}>
-              <s-text type="strong">Format</s-text>
-              <select
-                value={format}
-                onChange={(e) => setFormat(e.target.value)}
-                style={selectStyle}
-                disabled={isExporting || isPolling}
-              >
-                {FORMATS.map((f) => <option key={f} value={f}>{f.toUpperCase()}</option>)}
-              </select>
-            </label>
-
-            {/* Entity selection via Polaris Popover.
-                <s-popover> accepts arbitrary children, so the checkbox list
-                renders directly inside it. The trigger button uses commandFor
-                pointed at the popover's id. */}
-            <s-text type="strong">Entities to export</s-text>
-            <s-button
-              commandFor="entities-popover"
-              disabled={isExporting || isPolling ? true : undefined}
-            >
-              <s-stack direction="inline" gap="small-300" alignItems="center">
-                <s-text>
-                  {enabledEntities.length === 0
-                    ? "Choose entities"
-                    : `${enabledEntities.length} selected: ${enabledEntities.map(capitalize).join(", ")}`}
-                </s-text>
-                <s-icon type="chevron-down" />
-              </s-stack>
-            </s-button>
-            <s-popover id="entities-popover">
-              <s-box padding="base">
-                <s-stack direction="block" gap="small">
-                  {ENTITIES.map((e) => (
-                    <PolarisCheckbox
-                      key={e}
-                      label={capitalize(e)}
-                      checked={entityState[e].enabled}
-                      onChange={(v) => setEntityEnabled(e, v)}
-                      disabled={isExporting || isPolling}
-                    />
-                  ))}
-                </s-stack>
-              </s-box>
-            </s-popover>
+            <div style={entityGrid}>
+              {ENTITIES.map((e) => (
+                <PolarisCheckbox
+                  key={e}
+                  label={capitalize(e)}
+                  checked={entityState[e].enabled}
+                  onChange={(v) => setEntityEnabled(e, v)}
+                  disabled={isExporting || isPolling}
+                />
+              ))}
+            </div>
 
             {enabledEntities.length === 0 && (
               <s-banner tone="info">
@@ -354,6 +333,61 @@ export default function ExportPage() {
               </s-banner>
             )}
           </s-stack>
+        </s-section>
+
+        {/* ── Format card ──────────────────────────────────────────────
+            The trigger button (full width) shows the current format and uses
+            commandFor to open the popover. Inside, each format is a clickable
+            row that highlights and shows a checkmark when selected. */}
+        <s-section heading="Format">
+          {/* Block-level wrapper is naturally full width — measuring it gives
+              the true rendered button width to mirror onto the popover. */}
+          <div ref={formatTriggerRef} style={{ width: "100%" }}>
+            <s-clickable
+              command="--toggle"
+              commandFor="format-popover"
+              disabled={isExporting || isPolling ? true : undefined}
+              inlineSize="100%"
+              border="base"
+              borderRadius="base"
+              paddingInline="small-100"
+              paddingBlock="small-300"
+              background="base"
+            >
+              <s-grid gridTemplateColumns="1fr auto" gap="base" alignItems="center">
+                <span style={{ fontWeight: 700 }}>{format.toUpperCase()}</span>
+                <s-icon type="chevron-down" />
+              </s-grid>
+            </s-clickable>
+          </div>
+          <s-popover
+            id="format-popover"
+            inlineSize={formatTriggerWidth ? `${formatTriggerWidth}px` : "auto"}
+          >
+            <s-box padding="small-200">
+              <s-stack direction="block" gap="small-300">
+                {FORMATS.map((f) => {
+                  const selected = format === f;
+                  return (
+                    <s-clickable
+                      key={f}
+                      onClick={() => setFormat(f)}
+                      command="--hide"
+                      commandFor="format-popover"
+                      padding="small-200"
+                      borderRadius="base"
+                      {...(selected ? { background: "subdued" } : {})}
+                    >
+                      <s-grid gridTemplateColumns="1fr auto" gap="base" alignItems="center">
+                        <span style={{ fontWeight: selected ? 700 : 400 }}>{f.toUpperCase()}</span>
+                        {selected ? <s-icon type="check" /> : <s-box />}
+                      </s-grid>
+                    </s-clickable>
+                  );
+                })}
+              </s-stack>
+            </s-box>
+          </s-popover>
         </s-section>
 
         {/* One configuration card per enabled entity */}
@@ -635,6 +669,10 @@ const labelStyle = {
 const filterGrid = {
   display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
   gap: ".75rem", marginTop: ".75rem",
+};
+const entityGrid = {
+  display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
+  gap: ".5rem",
 };
 const columnsGrid = {
   display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
