@@ -64,14 +64,19 @@ export function buildProductQuery(filters = {}) {
  * @returns {string}
  */
 export function buildOrderQuery(filters = {}) {
-  const clauses = ["status:any"];
+  // Default to status:any (includes closed/cancelled/archived) unless the
+  // user explicitly narrows the open/closed state.
+  const clauses = [filters.status ? `status:${filters.status}` : "status:any"];
 
   if (filters.financialStatus)   clauses.push(`financial_status:${filters.financialStatus}`);
   if (filters.fulfillmentStatus) clauses.push(`fulfillment_status:${filters.fulfillmentStatus}`);
   if (filters.tag)               clauses.push(`tag:${quote(filters.tag)}`);
+  if (filters.sourceName)        clauses.push(`source_name:${quote(filters.sourceName)}`);
 
   if (filters.createdAtMin) clauses.push(`created_at:>=${filters.createdAtMin}`);
   if (filters.createdAtMax) clauses.push(`created_at:<=${filters.createdAtMax}`);
+  if (filters.updatedAtMin) clauses.push(`updated_at:>=${filters.updatedAtMin}`);
+  if (filters.updatedAtMax) clauses.push(`updated_at:<=${filters.updatedAtMax}`);
 
   return clauses.join(" ");
 }
@@ -157,6 +162,82 @@ export function buildContentQuery(filters = {}) {
   if (filters.createdAtMax) clauses.push(`created_at:<=${filters.createdAtMax}`);
   if (filters.updatedAtMin) clauses.push(`updated_at:>=${filters.updatedAtMin}`);
   if (filters.updatedAtMax) clauses.push(`updated_at:<=${filters.updatedAtMax}`);
+
+  return clauses.join(" ");
+}
+
+/**
+ * Build a Shopify URL-redirect search query string.
+ *
+ * Supported filters:
+ *   path   — partial old-path match
+ *   target — partial target match
+ */
+export function buildRedirectQuery(filters = {}) {
+  const clauses = [];
+
+  if (filters.path)   clauses.push(`path:${quote(filters.path)}`);
+  if (filters.target) clauses.push(`target:${quote(filters.target)}`);
+
+  return clauses.join(" ");
+}
+
+/**
+ * Build a Shopify files search query string.
+ *
+ * Supported filters:
+ *   mediaType — "IMAGE" | "VIDEO" | "GENERIC_FILE" | ...
+ *   status    — "READY" | "PROCESSING" | "FAILED" | "UPLOADED"
+ *   filename  — partial filename match
+ *   createdAtMin/Max — ISO date strings
+ */
+export function buildFileQuery(filters = {}) {
+  const clauses = [];
+
+  if (filters.mediaType) clauses.push(`media_type:${filters.mediaType}`);
+  if (filters.status)    clauses.push(`status:${filters.status}`);
+  if (filters.filename)  clauses.push(`filename:${quote(filters.filename)}`);
+
+  if (filters.createdAtMin) clauses.push(`created_at:>=${filters.createdAtMin}`);
+  if (filters.createdAtMax) clauses.push(`created_at:<=${filters.createdAtMax}`);
+
+  return clauses.join(" ");
+}
+
+/**
+ * Build a Shopify draft-orders search query string.
+ *
+ * Supported filters:
+ *   status           — "open" | "invoice_sent" | "completed"
+ *   tag              — single tag
+ *   createdAtMin/Max — ISO date strings
+ */
+export function buildDraftOrderQuery(filters = {}) {
+  const clauses = [];
+
+  if (filters.status) clauses.push(`status:${filters.status}`);
+  if (filters.tag)    clauses.push(`tag:${quote(filters.tag)}`);
+
+  if (filters.createdAtMin) clauses.push(`created_at:>=${filters.createdAtMin}`);
+  if (filters.createdAtMax) clauses.push(`created_at:<=${filters.createdAtMax}`);
+
+  return clauses.join(" ");
+}
+
+/**
+ * Build a Shopify companies search query string.
+ *
+ * Supported filters:
+ *   name             — partial company name match
+ *   createdAtMin/Max — ISO date strings
+ */
+export function buildCompanyQuery(filters = {}) {
+  const clauses = [];
+
+  if (filters.name) clauses.push(`name:${quote(filters.name)}`);
+
+  if (filters.createdAtMin) clauses.push(`created_at:>=${filters.createdAtMin}`);
+  if (filters.createdAtMax) clauses.push(`created_at:<=${filters.createdAtMax}`);
 
   return clauses.join(" ");
 }

@@ -9,7 +9,7 @@
  * for the CSV shape your users will see and re-import.
  */
 
-import { resolveColumns } from "./columns.js";
+import { resolveColumns, columnHeader } from "./columns.js";
 
 export const PRODUCT_CSV_COLUMNS = [
   "product_id",
@@ -49,7 +49,7 @@ export const PRODUCT_CSV_COLUMNS = [
 export function toCSV(rows, columns) {
   const cols = resolveColumns(rows, columns);
 
-  const lines = [cols.join(",")];
+  const lines = [cols.map((c) => escapeCSV(columnHeader(c))).join(",")];
 
   for (const row of rows) {
     const values = cols.map((col) => escapeCSV(row[col] ?? ""));

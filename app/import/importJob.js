@@ -8,8 +8,10 @@
 import { parseCSV } from "./parsers/csv.js";
 import { validateProductRows } from "./validators/products.js";
 import { validateOrderRows } from "./validators/orders.js";
+import { validateRedirectRows } from "./validators/redirects.js";
 import { upsertProducts } from "./writers/upsertProducts.js";
 import { upsertOrders } from "./writers/upsertOrders.js";
+import { upsertRedirects } from "./writers/upsertRedirects.js";
 
 const PARSERS = {
   csv: parseCSV,
@@ -19,14 +21,15 @@ const PARSERS = {
 };
 
 const VALIDATORS = {
-  products: validateProductRows,
-  orders:   validateOrderRows,
-  // collections: validateCollectionRows,
+  products:  validateProductRows,
+  orders:    validateOrderRows,
+  redirects: validateRedirectRows,
 };
 
 const WRITERS = {
-  products: upsertProducts,
-  orders:   upsertOrders,
+  products:  upsertProducts,
+  orders:    upsertOrders,
+  redirects: upsertRedirects,
 };
 
 /** Number of sample rows the analyze step returns for UI preview. */

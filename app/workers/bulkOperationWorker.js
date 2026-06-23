@@ -29,6 +29,9 @@ import { Readable }        from "stream";
 
 import { BULK_RECONCILE } from "../export/entities/bulk.js";
 import { FIELDS_BY_ENTITY } from "../export/fieldLists.js";
+import { columnHeader } from "../export/formats/columns.js";
+import { fetchCatalogData } from "../export/entities/catalogPrices.js";
+import { isCatalogColumn } from "../export/catalogColumns.js";
 import { markJobComplete, markJobFailed } from "../db/bulkExportJob.server.js";
 
 /** Minimum R2 multipart chunk size — 5MB (R2's minimum) */
@@ -53,8 +56,9 @@ const MIME_TYPES = {
  * @param {string} options.format      - "csv" | "json" | …
  * @param {string} options.shop        - "my-store.myshopify.com"
  * @param {string[]} [options.fields]  - column selection (undefined = all)
+ * @param {object} [options.admin]     - admin GraphQL client (for catalog prices)
  */
-export async function processBulkOperation({ jobId, jsonlUrl, entity, format, shop, fields }) {
+export async function processBulkOperation({ jobId, jsonlUrl, entity, format, shop, fields, admin }) {
   const mimeType  = MIME_TYPES[format] ?? "application/octet-stream";
   const timestamp = new Date().toISOString().slice(0, 19).replace("T", "-").replace(/:/g, "-");
   const filename  = `${entity}-${timestamp}.${format}`;
@@ -66,6 +70,13 @@ export async function processBulkOperation({ jobId, jsonlUrl, entity, format, sh
   // Columns to write — selected fields or the entity's full column list
   const columns = fields?.length ? fields : (FIELDS_BY_ENTITY[entity] ?? []);
   const fmt = makeFormatter(format, columns);
+
+  // Catalog prices live in a separate entity — fetch + index them once (when
+  // a catalog column is selected and we have an admin client) so the product
+  // rows can be joined to them by variant id, same as the direct path.
+  const needsCatalogPrices =
+    entity === "products" && Array.isArray(fields) && fields.some(isCatalogColumn);
+  const catalogData = needsCatalogPrices && admin ? await fetchCatalogData(admin) : undefined;
 
   const client = getR2Client();
   const bucket = process.env.R2_BUCKET_NAME;
@@ -120,9 +131,19 @@ export async function processBulkOperation({ jobId, jsonlUrl, entity, format, sh
 
       const flushParent = async () => {
         if (!currentParent) return;
-        const children = pendingChildren.length > 0 ? pendingChildren : [null];
-        for (const child of children) {
-          await emitRow(reconcile.normalize(currentParent, child));
+        if (reconcile.buildRows) {
+          // rowCount = rows already emitted, so this parent's first row is rowCount + 1.
+          for (const row of reconcile.buildRows(currentParent, pendingChildren, rowCount + 1, {
+            catalogPriceMap: catalogData?.priceMap,
+            catalogs: catalogData?.catalogs,
+          })) {
+            await emitRow(row);
+          }
+        } else {
+          const children = pendingChildren.length > 0 ? pendingChildren : [null];
+          for (const child of children) {
+            await emitRow(reconcile.normalize(currentParent, child));
+          }
         }
       };
 
@@ -229,7 +250,7 @@ function makeFormatter(format, columns) {
       separator: (i) => (i === 0 ? "\n" : ",\n"),
       encode: (row) => {
         const obj = {};
-        for (const col of columns) obj[col] = row[col] ?? "";
+        for (const col of columns) obj[columnHeader(col)] = row[col] ?? "";
         return JSON.stringify(obj);
       },
       suffix: "\n]",
@@ -243,7 +264,7 @@ function makeFormatter(format, columns) {
       encode: (row) => {
         const cells = columns
           .map((col) => {
-            const tag = xmlElementName(col);
+            const tag = xmlElementName(columnHeader(col));
             return `    <${tag}>${escapeXML(row[col] ?? "")}</${tag}>`;
           })
           .join("\n");
@@ -255,7 +276,7 @@ function makeFormatter(format, columns) {
 
   // csv (default): header is the prefix, each row preceded by a newline
   return {
-    prefix: columns.join(","),
+    prefix: columns.map((c) => escapeCSV(columnHeader(c))).join(","),
     separator: () => "\r\n",
     encode: (row) => columns.map((col) => escapeCSV(row[col] ?? "")).join(","),
     suffix: "",

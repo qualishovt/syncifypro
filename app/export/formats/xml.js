@@ -7,7 +7,7 @@
  * output round-trips with the flat CSV/JSON importer.
  */
 
-import { resolveColumns } from "./columns.js";
+import { resolveColumns, columnHeader } from "./columns.js";
 
 /**
  * Serialize rows to an XML Buffer.
@@ -24,7 +24,7 @@ export function toXML(rows, columns) {
   for (const row of rows) {
     lines.push("  <row>");
     for (const col of cols) {
-      const tag = elementName(col);
+      const tag = elementName(columnHeader(col));
       lines.push(`    <${tag}>${escapeXML(row[col] ?? "")}</${tag}>`);
     }
     lines.push("  </row>");

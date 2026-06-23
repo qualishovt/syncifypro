@@ -17,7 +17,7 @@ const ARTICLES_QUERY = `#graphql
         templateSuffix tags createdAt updatedAt
         author { name }
         blog { id title handle }
-        image { url }
+        image { url altText }
       }
     }
   }

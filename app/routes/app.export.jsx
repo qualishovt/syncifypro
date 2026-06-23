@@ -15,13 +15,16 @@
  * native Shopify admin via the surrounding s-page/s-section/s-stack.
  */
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useFetcher, useLoaderData } from "react-router";
 import { data } from "react-router";
 import { authenticate } from "../shopify.server.js";
 import { runExportJob, runMultiEntityExport } from "../export/exportJob.js";
 import { getJob, getJobsForShop } from "../db/bulkExportJob.server.js";
-import { FIELDS_BY_ENTITY, PRODUCT_FIELDS } from "../export/fieldLists.js";
+import { FIELDS_BY_ENTITY, PRODUCT_FIELDS, COLUMN_GROUPS_BY_ENTITY, FIELD_LABELS, placeholderFor } from "../export/fieldLists.js";
+import { buildInventoryFieldKeys } from "../export/inventoryColumns.js";
+import { buildMetafieldFieldKeys, PRODUCT_MF_PREFIX, VARIANT_MF_PREFIX } from "../export/metafieldColumns.js";
+import { buildCatalogFieldKeys } from "../export/catalogColumns.js";
 
 /**
  * Per-entity filter controls — each maps to a key the matching filter
@@ -37,6 +40,7 @@ const FILTERS_BY_ENTITY = {
     { key: "createdAtMax", label: "Created before", type: "date" },
   ],
   orders: [
+    { key: "status", label: "Status", type: "select", options: opts(["open", "closed", "cancelled", "any"]) },
     {
       key: "financialStatus", label: "Financial status", type: "select",
       options: opts(["paid", "pending", "refunded", "partially_refunded", "voided"])
@@ -46,8 +50,11 @@ const FILTERS_BY_ENTITY = {
       options: opts(["fulfilled", "unfulfilled", "partial"])
     },
     { key: "tag", label: "Tag", type: "text" },
+    { key: "sourceName", label: "Source", type: "text", placeholder: "e.g. web, pos" },
     { key: "createdAtMin", label: "Created after", type: "date" },
     { key: "createdAtMax", label: "Created before", type: "date" },
+    { key: "updatedAtMin", label: "Updated after", type: "date" },
+    { key: "updatedAtMax", label: "Updated before", type: "date" },
   ],
   customers: [
     { key: "state", label: "State", type: "select", options: opts(["enabled", "disabled", "invited", "declined"]) },
@@ -56,10 +63,22 @@ const FILTERS_BY_ENTITY = {
     { key: "tag", label: "Tag", type: "text" },
     { key: "createdAtMin", label: "Created after", type: "date" },
     { key: "createdAtMax", label: "Created before", type: "date" },
+    { key: "updatedAtMin", label: "Updated after", type: "date" },
+    { key: "updatedAtMax", label: "Updated before", type: "date" },
   ],
   collections: [
     { key: "title", label: "Title", type: "text" },
     { key: "collectionType", label: "Type", type: "select", options: opts(["smart", "custom"]) },
+    { key: "updatedAtMin", label: "Updated after", type: "date" },
+    { key: "updatedAtMax", label: "Updated before", type: "date" },
+  ],
+  smart_collections: [
+    { key: "title", label: "Title", type: "text" },
+    { key: "updatedAtMin", label: "Updated after", type: "date" },
+    { key: "updatedAtMax", label: "Updated before", type: "date" },
+  ],
+  custom_collections: [
+    { key: "title", label: "Title", type: "text" },
     { key: "updatedAtMin", label: "Updated after", type: "date" },
     { key: "updatedAtMax", label: "Updated before", type: "date" },
   ],
@@ -70,10 +89,83 @@ const FILTERS_BY_ENTITY = {
   pages: contentFilters(),
   blogs: contentFilters(),
   articles: contentFilters(),
+  redirects: [
+    { key: "path", label: "Path", type: "text", placeholder: "e.g. /old-url" },
+    { key: "target", label: "Target", type: "text", placeholder: "e.g. /products/new" },
+  ],
+  shop: [],
+  files: [
+    { key: "mediaType", label: "Media type", type: "select", options: opts(["IMAGE", "VIDEO", "GENERIC_FILE"]) },
+    { key: "status", label: "Status", type: "select", options: opts(["READY", "PROCESSING", "FAILED", "UPLOADED"]) },
+    { key: "filename", label: "Filename", type: "text" },
+    { key: "createdAtMin", label: "Created after", type: "date" },
+    { key: "createdAtMax", label: "Created before", type: "date" },
+  ],
+  payouts: [],
+  menus: [],
+  companies: [
+    { key: "name", label: "Name", type: "text", placeholder: "e.g. Acme Inc." },
+    { key: "createdAtMin", label: "Created after", type: "date" },
+    { key: "createdAtMax", label: "Created before", type: "date" },
+  ],
+  draft_orders: [
+    { key: "status", label: "Status", type: "select", options: opts(["open", "invoice_sent", "completed"]) },
+    { key: "tag", label: "Tag", type: "text" },
+    { key: "createdAtMin", label: "Created after", type: "date" },
+    { key: "createdAtMax", label: "Created before", type: "date" },
+  ],
+  activity: [],
+  metaobjects: [],
+  metafields: [],
+  translations: [],
+  locations: [],
+  catalogs: [],
+  metaobject_definitions: [],
+  inventory_transfers: [],
+  definitions: [],
+  content: contentFilters(),
 };
 
 function opts(values) {
   return values.map((v) => ({ value: v, label: v.replace(/_/g, " ") }));
+}
+
+// Some product groups are dynamic — their columns depend on the store
+// (locations, metafield definitions, catalogs). They're appended to the
+// static products config at runtime and left off the default selection
+// (each is a slow extra fetch). Column keys are the human headers.
+function buildProductDynamicGroups({ locations, productMetafieldDefs, variantMetafieldDefs, catalogs } = {}) {
+  const groups = [];
+  const inv = buildInventoryFieldKeys(locations ?? []);
+  if (inv.length) groups.push({ label: "Locations", speed: "Slow", fields: inv });
+
+  const pmf = buildMetafieldFieldKeys(productMetafieldDefs ?? [], PRODUCT_MF_PREFIX);
+  if (pmf.length) groups.push({ label: "Metadata", speed: "Slow", fields: pmf });
+
+  const vmf = buildMetafieldFieldKeys(variantMetafieldDefs ?? [], VARIANT_MF_PREFIX);
+  if (vmf.length) groups.push({ label: "Variant Metadata", speed: "Slow", fields: vmf });
+
+  const cat = buildCatalogFieldKeys(catalogs ?? []);
+  if (cat.length) groups.push({ label: "Markets", speed: "Slow", fields: cat });
+
+  return groups;
+}
+
+// Stable empty reference for entities without dynamic groups.
+const EMPTY_DYN_GROUPS = [];
+
+/** Full column list for an entity, including its dynamic group keys. */
+function allFieldsFor(entity, dynGroups) {
+  const base = FIELDS_BY_ENTITY[entity] ?? PRODUCT_FIELDS;
+  const dyn = dynGroups.flatMap((g) => g.fields);
+  return dyn.length ? [...base, ...dyn] : base;
+}
+
+/** Column groups for an entity, with its dynamic groups appended. */
+function groupsFor(entity, dynGroups) {
+  const base = COLUMN_GROUPS_BY_ENTITY[entity]
+    ?? [{ label: "All", fields: FIELDS_BY_ENTITY[entity] ?? PRODUCT_FIELDS }];
+  return dynGroups.length ? [...base, ...dynGroups] : base;
 }
 
 function contentFilters() {
@@ -91,8 +183,94 @@ function contentFilters() {
 //   - When ?jobId=… is present → return that single bulk job's status (polling).
 //   - Always → return the recent-exports list for the shop.
 
+// One request fetches every entity's record count. `articles` has no
+// top-level count query in the Admin API, so it's intentionally omitted.
+const ENTITY_COUNTS_QUERY = `#graphql
+  query EntityCounts {
+    productsCount { count }
+    ordersCount { count }
+    customersCount { count }
+    collectionsCount { count }
+    discountNodesCount { count }
+    pagesCount { count }
+    blogsCount { count }
+    urlRedirectsCount { count }
+    companiesCount { count }
+    draftOrdersCount { count }
+    locationsCount { count }
+    catalogsCount { count }
+  }
+`;
+
+const COUNT_FIELD_BY_ENTITY = {
+  products: "productsCount",
+  orders: "ordersCount",
+  customers: "customersCount",
+  collections: "collectionsCount",
+  smart_collections: "collectionsCount",
+  custom_collections: "collectionsCount",
+  discounts: "discountNodesCount",
+  pages: "pagesCount",
+  blogs: "blogsCount",
+  redirects: "urlRedirectsCount",
+  companies: "companiesCount",
+  draft_orders: "draftOrdersCount",
+  locations: "locationsCount",
+  catalogs: "catalogsCount",
+};
+
+/**
+ * Returns { entity → count } for every entity with a count query. Any
+ * entity whose scope is missing (partial GraphQL data) or that has no
+ * count query resolves to null, which the UI renders as "—".
+ */
+async function getEntityCounts(admin) {
+  try {
+    const response = await admin.graphql(ENTITY_COUNTS_QUERY);
+    const { data } = await response.json();
+    const counts = {};
+    for (const [entity, field] of Object.entries(COUNT_FIELD_BY_ENTITY)) {
+      counts[entity] = data?.[field]?.count ?? null;
+    }
+    return counts;
+  } catch {
+    return {};
+  }
+}
+
+// Drives the dynamic product groups: locations → Multi-Location Inventory,
+// metafield definitions → Metafields / Variant Metafields, catalogs → Pricing.
+const PRODUCT_DYNAMIC_QUERY = `#graphql
+  query ExportProductDynamic {
+    locations(first: 50) { nodes { id name } }
+    productDefs: metafieldDefinitions(first: 250, ownerType: PRODUCT) { nodes { namespace key type { name } } }
+    variantDefs: metafieldDefinitions(first: 250, ownerType: PRODUCTVARIANT) { nodes { namespace key type { name } } }
+    catalogs(first: 50) { nodes { __typename title } }
+  }
+`;
+
+const EMPTY_PRODUCT_DYNAMIC = { locations: [], productMetafieldDefs: [], variantMetafieldDefs: [], catalogs: [] };
+
+async function getProductDynamic(admin) {
+  try {
+    const response = await admin.graphql(PRODUCT_DYNAMIC_QUERY);
+    const { data } = await response.json();
+    return {
+      locations: data?.locations?.nodes ?? [],
+      productMetafieldDefs: data?.productDefs?.nodes ?? [],
+      variantMetafieldDefs: data?.variantDefs?.nodes ?? [],
+      // Skip channel-owned AppCatalogs (e.g. Online Store, POS) — they carry no
+      // merchant price list, so "Pricing by Catalogs" should only surface Market
+      // and B2B (company-location) catalogs, matching Matrixify.
+      catalogs: (data?.catalogs?.nodes ?? []).filter((c) => c.__typename !== "AppCatalog"),
+    };
+  } catch {
+    return EMPTY_PRODUCT_DYNAMIC;
+  }
+}
+
 export async function loader({ request }) {
-  const { session } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
 
   const url = new URL(request.url);
   const jobId = url.searchParams.get("jobId");
@@ -125,7 +303,12 @@ export async function loader({ request }) {
     error: j.errorMessage,
   }));
 
-  return { polledJob, recentJobs };
+  // Skip the counts + dynamic-column queries while polling a job (jobId
+  // present) so we don't re-run them every few seconds.
+  const counts = jobId ? {} : await getEntityCounts(admin);
+  const productDynamic = jobId ? EMPTY_PRODUCT_DYNAMIC : await getProductDynamic(admin);
+
+  return { polledJob, recentJobs, counts, productDynamic };
 }
 
 // ─── Action ───────────────────────────────────────────────────────────────────
@@ -178,8 +361,56 @@ export async function action({ request }) {
 
 // ─── UI ───────────────────────────────────────────────────────────────────────
 
-const ENTITIES = ["products", "orders", "customers", "collections", "discounts", "pages", "blogs", "articles"];
+const ENTITIES = ["products", "orders", "customers", "collections", "discounts", "content", "draft_orders", "redirects", "shop", "files", "payouts", "menus", "companies", "locations", "catalogs", "inventory_transfers", "activity", "metaobjects", "definitions", "translations"];
 const FORMATS = ["csv", "excel", "xml", "json"];
+const FORMAT_LABELS = { csv: "CSV", excel: "Excel", xml: "XML", json: "JSON" };
+
+// Conditions for the dynamic filter builder. Order matters — the first is
+// the default for a new row. The two "empty" operators take no value.
+const FILTER_OPERATORS = [
+  { value: "equals_any", label: "Equals to any of" },
+  { value: "contains_any", label: "Contains any of" },
+  { value: "contains_none", label: "Contains none of" },
+  { value: "not_equal_any", label: "Not equal to any of" },
+  { value: "starts_with_any", label: "Starts with any of" },
+  { value: "is_empty", label: "Is empty" },
+  { value: "is_not_empty", label: "Is not empty" },
+];
+const VALUELESS_OPERATORS = new Set(["is_empty", "is_not_empty"]);
+
+// Built-in presets, always shown above the user's saved exports.
+const PRESET_BUILTIN = ["Latest Export", "New Export"];
+
+// Polaris s-icon type per entity.
+const ENTITY_ICONS = {
+  products: "product",
+  orders: "order",
+  customers: "person",
+  collections: "collection",
+  smart_collections: "collection",
+  custom_collections: "collection",
+  discounts: "discount",
+  pages: "page",
+  blogs: "blog",
+  articles: "note",
+  redirects: "link",
+  shop: "store",
+  files: "image",
+  payouts: "bank",
+  menus: "menu",
+  companies: "store-managed",
+  draft_orders: "order-draft",
+  activity: "clock",
+  metaobjects: "database",
+  metaobject_definitions: "database",
+  metafields: "metafields",
+  translations: "language-translate",
+  locations: "location",
+  catalogs: "collection-list",
+  inventory_transfers: "transfer-in",
+  content: "page",
+  definitions: "data-table",
+};
 
 const STATUS_TONE = {
   complete: "success",
@@ -189,9 +420,26 @@ const STATUS_TONE = {
 };
 
 export default function ExportPage() {
-  const { recentJobs } = useLoaderData();
+  const { recentJobs, counts, productDynamic } = useLoaderData();
+
+  // Dynamic product groups (inventory, metafields, variant metafields,
+  // catalog pricing), derived from store data. Empty groups are omitted.
+  const productDynamicGroups = useMemo(
+    () => buildProductDynamicGroups(productDynamic ?? EMPTY_PRODUCT_DYNAMIC),
+    [productDynamic],
+  );
+  const dynGroupsFor = (entity) => (entity === "products" ? productDynamicGroups : EMPTY_DYN_GROUPS);
 
   const [format, setFormat] = useState("csv");
+
+  // Preset state. "Latest Export" and "New Export" are built-in presets;
+  // savedPresets holds user-saved configurations. presetName backs the
+  // save modal's input; lastConfig captures the most recent export so
+  // "Latest Export" can restore it.
+  const [preset, setPreset] = useState("New Export");
+  const [savedPresets, setSavedPresets] = useState([]);
+  const [presetName, setPresetName] = useState("");
+  const [lastConfig, setLastConfig] = useState(null);
 
   // Per-entity state: { enabled, filters: {key→value}, selectedFields: string[] }
   const [entityState, setEntityState] = useState(() => initialEntityState());
@@ -201,10 +449,35 @@ export default function ExportPage() {
   function setEntityEnabled(key, value) {
     setEntityState((prev) => ({ ...prev, [key]: { ...prev[key], enabled: value } }));
   }
-  function setEntityFilter(key, filterKey, value) {
+  // Dynamic filter rows: each entity holds an ordered list of
+  // { id, column, operator, value }. Add appends a blank row defaulted to
+  // the entity's first column; update patches one row; remove drops it.
+  function addEntityFilterRow(key) {
+    const cols = FIELDS_BY_ENTITY[key] ?? PRODUCT_FIELDS;
     setEntityState((prev) => ({
       ...prev,
-      [key]: { ...prev[key], filters: { ...prev[key].filters, [filterKey]: value } },
+      [key]: {
+        ...prev[key],
+        advancedFilters: [
+          ...prev[key].advancedFilters,
+          { id: crypto.randomUUID(), column: cols[0], operator: FILTER_OPERATORS[0].value, value: "" },
+        ],
+      },
+    }));
+  }
+  function updateEntityFilterRow(key, id, patch) {
+    setEntityState((prev) => ({
+      ...prev,
+      [key]: {
+        ...prev[key],
+        advancedFilters: prev[key].advancedFilters.map((r) => (r.id === id ? { ...r, ...patch } : r)),
+      },
+    }));
+  }
+  function removeEntityFilterRow(key, id) {
+    setEntityState((prev) => ({
+      ...prev,
+      [key]: { ...prev[key], advancedFilters: prev[key].advancedFilters.filter((r) => r.id !== id) },
     }));
   }
   function toggleEntityField(key, field) {
@@ -222,20 +495,11 @@ export default function ExportPage() {
   const pollFetcher = useFetcher();
   const [pollingJobId, setPollingJobId] = useState(null);
 
-  // Keep the format popover's width in sync with its full-width trigger
-  // button. s-popover has no "match trigger" option, so we measure the
-  // trigger and feed its pixel width into the popover's inlineSize.
-  const formatTriggerRef = useRef(null);
-  const [formatTriggerWidth, setFormatTriggerWidth] = useState(null);
-  useEffect(() => {
-    const el = formatTriggerRef.current;
-    if (!el) return;
-    const update = () => setFormatTriggerWidth(el.offsetWidth);
-    update();
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
+  // Each popover matches the width of its full-width trigger (s-popover has
+  // no "match trigger" option), so we measure the trigger and feed its pixel
+  // width into the popover's inlineSize.
+  const [formatTriggerRef, formatTriggerWidth] = useElementWidth();
+  const [presetTriggerRef, presetTriggerWidth] = useElementWidth();
 
   const isExporting = fetcher.state !== "idle";
   const result = fetcher.data;
@@ -254,14 +518,39 @@ export default function ExportPage() {
     return () => clearInterval(interval);
   }, [pollingJobId, pollFetcher.data?.polledJob?.status, pollFetcher]);
 
+  // Apply a preset: built-ins reset or restore the last export; a saved
+  // preset restores its stored format + entity configuration.
+  function applyPreset(name) {
+    setPreset(name);
+    if (name === "New Export") {
+      setEntityState(initialEntityState());
+      setFormat("csv");
+    } else if (name === "Latest Export") {
+      if (lastConfig) { setFormat(lastConfig.format); setEntityState(lastConfig.entityState); }
+    } else {
+      const p = savedPresets.find((s) => s.name === name);
+      if (p) { setFormat(p.format); setEntityState(p.entityState); }
+    }
+  }
+
+  // Save the current configuration as a named preset (overwrites same name).
+  function savePreset() {
+    const name = presetName.trim();
+    if (!name) return;
+    setSavedPresets((prev) => [...prev.filter((p) => p.name !== name), { name, format, entityState }]);
+    setPreset(name);
+    setPresetName("");
+  }
+
   function handleExport() {
     setPollingJobId(null);
+    setLastConfig({ format, entityState });
 
     // Build one spec per enabled entity. We omit `fields` when the user
     // hasn't deselected anything (so the backend uses defaults / all).
     const specs = enabledEntities.map((e) => {
       const s = entityState[e];
-      const all = FIELDS_BY_ENTITY[e] ?? PRODUCT_FIELDS;
+      const all = allFieldsFor(e, dynGroupsFor(e));
       const defs = FILTERS_BY_ENTITY[e] ?? [];
 
       const filters = {};
@@ -270,11 +559,21 @@ export default function ExportPage() {
         if (value) filters[def.key] = value;
       }
 
-      const fields = s.selectedFields.length === all.length
+      // Products always send an explicit list: the "all selected → undefined"
+      // shortcut would make the backend fall back to the static field list and
+      // drop the dynamic inventory columns.
+      const fields = e !== "products" && s.selectedFields.length === all.length
         ? undefined
         : s.selectedFields;
 
-      return { entity: e, filters, fields };
+      // Keep only rows that are actually usable: a column, an operator, and
+      // (unless the operator is value-less) a non-empty value.
+      const advancedFilters = (s.advancedFilters ?? [])
+        .filter((r) => r.column && r.operator &&
+          (VALUELESS_OPERATORS.has(r.operator) || r.value.trim() !== ""))
+        .map((r) => ({ column: r.column, operator: r.operator, value: r.value.trim() }));
+
+      return { entity: e, filters, fields, advancedFilters };
     });
 
     const formData = new FormData();
@@ -309,22 +608,52 @@ export default function ExportPage() {
 
   return (
     <s-page heading="Export">
+      {/* Hover highlight for column groups and their column rows. */}
+      <style>{`
+        .eg-row, .eg-col { transition: background-color .1s ease; }
+        .eg-row:hover, .eg-col:hover { background: #f6f6f7; }
+      `}</style>
       <s-stack direction="block" gap="base">
 
         {/* ── Entities card ────────────────────────────────────────── */}
         <s-section heading="Entities to export">
           <s-stack direction="block" gap="base">
             <div style={entityGrid}>
-              {ENTITIES.map((e) => (
-                <div key={e} style={entityBox}>
-                  <PolarisCheckbox
-                    label={capitalize(e)}
-                    checked={entityState[e].enabled}
-                    onChange={(v) => setEntityEnabled(e, v)}
-                    disabled={isExporting || isPolling}
-                  />
-                </div>
-              ))}
+              {ENTITIES.map((e) => {
+                const enabled = entityState[e].enabled;
+                const locked = isExporting || isPolling;
+                return (
+                  <div
+                    key={e}
+                    onClick={() => { if (!locked) setEntityEnabled(e, !enabled); }}
+                    style={{
+                      ...entityBox,
+                      background: enabled ? "#e3e5e7" : "#fff",
+                      cursor: locked ? "not-allowed" : "pointer",
+                      opacity: locked ? 0.6 : 1,
+                    }}
+                  >
+                    {/* Order: checkbox → icon → text. The whole box handles the
+                        click, so the checkbox must not capture pointer events
+                        (no double toggle). Its label is kept for screen readers
+                        only; the visible text is rendered separately after the icon. */}
+                    <span style={{ pointerEvents: "none", display: "inline-flex" }}>
+                      <PolarisCheckbox
+                        label={capitalize(e)}
+                        labelAccessibilityVisibility="exclusive"
+                        checked={enabled}
+                        onChange={(v) => setEntityEnabled(e, v)}
+                        disabled={locked}
+                      />
+                    </span>
+                    {ENTITY_ICONS[e] && <s-icon type={ENTITY_ICONS[e]} size="small" />}
+                    <span style={entityLabel}>{capitalize(e)}</span>
+                    <span style={entityCount}>
+                      {counts?.[e] != null ? <s-badge>{counts[e].toLocaleString()}</s-badge> : "—"}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
 
             {enabledEntities.length === 0 && (
@@ -334,6 +663,82 @@ export default function ExportPage() {
               </s-banner>
             )}
           </s-stack>
+        </s-section>
+
+        {/* ── Preset + Format row (50/50) ─────────────────────────────── */}
+        <div style={twoColRow}>
+
+        {/* ── Preset card ──────────────────────────────────────────────
+            Same trigger+popover pattern as Format, with a Save button beside
+            it that opens a modal to store the current configuration. */}
+        <s-section heading="Preset">
+          <div style={{ display: "flex", gap: ".5rem", alignItems: "stretch" }}>
+            <div ref={presetTriggerRef} style={{ flex: 1, minWidth: 0 }}>
+              <s-clickable
+                command="--toggle"
+                commandFor="preset-popover"
+                disabled={isExporting || isPolling ? true : undefined}
+                inlineSize="100%"
+                borderWidth="base"
+                borderStyle="solid"
+                borderColor="strong"
+                borderRadius="base"
+                paddingInline="small-100"
+                blockSize="32px"
+                background="base"
+              >
+                <s-grid gridTemplateColumns="1fr auto" gap="base" alignItems="center">
+                  <span>{preset}</span>
+                  <s-icon type="select" />
+                </s-grid>
+              </s-clickable>
+            </div>
+            <s-button
+              commandFor="save-preset-modal"
+              disabled={isExporting || isPolling ? true : undefined}
+            >
+              Save
+            </s-button>
+          </div>
+          <s-popover id="preset-popover" {...widthProps(presetTriggerWidth)}>
+            <s-box padding="small-200">
+              <s-stack direction="block" gap="small-300">
+                {PRESET_BUILTIN.map((name) => (
+                  <PickerRow key={name} label={name} selected={preset === name} onSelect={() => applyPreset(name)} popoverId="preset-popover" />
+                ))}
+                <s-text color="subdued">Saved</s-text>
+                {savedPresets.length === 0 ? (
+                  <s-text color="subdued">No saved exports yet.</s-text>
+                ) : (
+                  savedPresets.map((p) => (
+                    <PickerRow key={p.name} label={p.name} selected={preset === p.name} onSelect={() => applyPreset(p.name)} popoverId="preset-popover" />
+                  ))
+                )}
+              </s-stack>
+            </s-box>
+          </s-popover>
+
+          {/* Save-configuration modal */}
+          <s-modal id="save-preset-modal" heading="Save preset">
+            <PolarisTextField
+              label="Preset name"
+              value={presetName}
+              onChange={setPresetName}
+              placeholder="e.g. Weekly products"
+            />
+            <s-button
+              slot="primary-action"
+              variant="primary"
+              onClick={savePreset}
+              command="--hide"
+              commandFor="save-preset-modal"
+            >
+              Save
+            </s-button>
+            <s-button slot="secondary-actions" command="--hide" commandFor="save-preset-modal">
+              Cancel
+            </s-button>
+          </s-modal>
         </s-section>
 
         {/* ── Format card ──────────────────────────────────────────────
@@ -349,47 +754,38 @@ export default function ExportPage() {
               commandFor="format-popover"
               disabled={isExporting || isPolling ? true : undefined}
               inlineSize="100%"
-              border="base"
+              borderWidth="base"
+              borderStyle="solid"
+              borderColor="strong"
               borderRadius="base"
               paddingInline="small-100"
-              paddingBlock="small-300"
+              blockSize="32px"
               background="base"
             >
               <s-grid gridTemplateColumns="1fr auto" gap="base" alignItems="center">
-                <span style={{ fontWeight: 700 }}>{format.toUpperCase()}</span>
-                <s-icon type="chevron-down" />
+                <span>{FORMAT_LABELS[format] ?? format}</span>
+                <s-icon type="select" />
               </s-grid>
             </s-clickable>
           </div>
-          <s-popover
-            id="format-popover"
-            inlineSize={formatTriggerWidth ? `${formatTriggerWidth}px` : "auto"}
-          >
+          <s-popover id="format-popover" {...widthProps(formatTriggerWidth)}>
             <s-box padding="small-200">
               <s-stack direction="block" gap="small-300">
-                {FORMATS.map((f) => {
-                  const selected = format === f;
-                  return (
-                    <s-clickable
-                      key={f}
-                      onClick={() => setFormat(f)}
-                      command="--hide"
-                      commandFor="format-popover"
-                      padding="small-200"
-                      borderRadius="base"
-                      {...(selected ? { background: "subdued" } : {})}
-                    >
-                      <s-grid gridTemplateColumns="1fr auto" gap="base" alignItems="center">
-                        <span style={{ fontWeight: selected ? 700 : 400 }}>{f.toUpperCase()}</span>
-                        {selected ? <s-icon type="check" /> : <s-box />}
-                      </s-grid>
-                    </s-clickable>
-                  );
-                })}
+                {FORMATS.map((f) => (
+                  <PickerRow
+                    key={f}
+                    label={FORMAT_LABELS[f] ?? f}
+                    selected={format === f}
+                    onSelect={() => setFormat(f)}
+                    popoverId="format-popover"
+                  />
+                ))}
               </s-stack>
             </s-box>
           </s-popover>
         </s-section>
+
+        </div>
 
         {/* One configuration card per enabled entity */}
         {enabledEntities.map((e) => (
@@ -397,9 +793,14 @@ export default function ExportPage() {
             key={e}
             entity={e}
             state={entityState[e]}
-            onFilter={(k, v) => setEntityFilter(e, k, v)}
+            count={counts?.[e] ?? null}
+            dynGroups={dynGroupsFor(e)}
+            onAddFilter={() => addEntityFilterRow(e)}
+            onUpdateFilter={(id, patch) => updateEntityFilterRow(e, id, patch)}
+            onRemoveFilter={(id) => removeEntityFilterRow(e, id)}
             onToggleField={(f) => toggleEntityField(e, f)}
             onSetFields={(fields) => setEntityFields(e, fields)}
+            onRemove={() => setEntityEnabled(e, false)}
             disabled={isExporting || isPolling}
           />
         ))}
@@ -407,22 +808,23 @@ export default function ExportPage() {
         {/* Submit */}
         <s-section>
           <s-stack direction="block" gap="base">
-            <s-stack direction="inline" gap="small">
-              <button
-                type="button"
-                onClick={handleExport}
-                disabled={!canSubmit}
-                style={{ ...primaryBtn, opacity: canSubmit ? 1 : 0.5, cursor: canSubmit ? "pointer" : "not-allowed" }}
-              >
-                {isExporting ? "Starting export…" : "Export"}
-              </button>
+            <s-grid gridTemplateColumns="1fr auto" gap="small" alignItems="center">
               <s-text color="subdued">
                 {enabledEntities.length === 0
                   ? "No entities selected."
                   : `${enabledEntities.length} entit${enabledEntities.length === 1 ? "y" : "ies"} selected.`
                 }
               </s-text>
-            </s-stack>
+              <s-button
+                variant="primary"
+                icon="download"
+                onClick={handleExport}
+                disabled={!canSubmit ? true : undefined}
+                loading={isExporting ? true : undefined}
+              >
+                Export
+              </s-button>
+            </s-grid>
 
             {/* Errors */}
             {(result?.error || bulkError) && (
@@ -486,7 +888,7 @@ export default function ExportPage() {
                 {recentJobs.map((j) => (
                   <s-table-row key={j.id}>
                     <s-table-cell>{capitalize(j.entity)}</s-table-cell>
-                    <s-table-cell>{j.format.toUpperCase()}</s-table-cell>
+                    <s-table-cell>{FORMAT_LABELS[j.format] ?? j.format}</s-table-cell>
                     <s-table-cell>
                       <s-badge tone={STATUS_TONE[j.status] ?? "info"}>{j.status}</s-badge>
                     </s-table-cell>
@@ -518,8 +920,75 @@ export default function ExportPage() {
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 function capitalize(s) {
-  return s.charAt(0).toUpperCase() + s.slice(1);
+  // Title-case each underscore-separated word: "smart_collections" → "Smart Collections".
+  return s.split("_").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
 }
+
+/**
+ * Rough client-side export-time estimate from the row count. Returns "—"
+ * when the count is unavailable (e.g. articles).
+ */
+function estimateExport(rows) {
+  if (rows == null) return "—";
+  const secs = Math.max(2, Math.ceil(rows / 500));
+  return secs < 60 ? `${secs} sec` : `${Math.ceil(secs / 60)} min`;
+}
+
+/**
+ * Pins a popover to an exact pixel width (min = max = inlineSize) so it
+ * matches its trigger instead of sizing to its content. Returns nothing
+ * until the trigger width has been measured.
+ */
+function widthProps(w) {
+  if (!w) return {};
+  const px = `${w}px`;
+  return { inlineSize: px, minInlineSize: px, maxInlineSize: px };
+}
+
+/**
+ * Measures an element's rendered width via ResizeObserver. Used to size a
+ * popover to match its full-width trigger.
+ */
+function useElementWidth() {
+  const ref = useRef(null);
+  const [width, setWidth] = useState(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = () => setWidth(el.offsetWidth);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return [ref, width];
+}
+
+/**
+ * One selectable row in a picker popover (preset or format), styled like
+ * Shopify's single-select field: a reserved left column holds a checkmark
+ * for the selected option so every label aligns. Selecting it applies the
+ * value and closes the popover via the declarative command.
+ */
+/* eslint-disable react/prop-types */
+function PickerRow({ label, selected, onSelect, popoverId }) {
+  return (
+    <s-clickable
+      onClick={onSelect}
+      command="--hide"
+      commandFor={popoverId}
+      padding="small-200"
+      borderRadius="base"
+      {...(selected ? { background: "subdued" } : {})}
+    >
+      <s-grid gridTemplateColumns="auto 1fr" gap="small-200" alignItems="center">
+        <span style={checkSlot}>{selected ? <s-icon type="check" /> : null}</span>
+        <span style={selected ? { fontWeight: 700 } : undefined}>{label}</span>
+      </s-grid>
+    </s-clickable>
+  );
+}
+/* eslint-enable react/prop-types */
 
 function isExpired(iso) {
   if (!iso) return false;
@@ -537,6 +1006,7 @@ function initialEntityState() {
     state[e] = {
       enabled: false,
       filters: {},
+      advancedFilters: [],
       selectedFields: [...(FIELDS_BY_ENTITY[e] ?? PRODUCT_FIELDS)],
     };
   }
@@ -550,7 +1020,7 @@ function initialEntityState() {
  * the element via a ref.
  */
 /* eslint-disable react/prop-types */
-function PolarisCheckbox({ label, checked, onChange, disabled }) {
+function PolarisCheckbox({ label, checked, onChange, disabled, labelAccessibilityVisibility, indeterminate }) {
   const ref = useRef(null);
 
   useEffect(() => {
@@ -567,9 +1037,191 @@ function PolarisCheckbox({ label, checked, onChange, disabled }) {
     <s-checkbox
       ref={ref}
       label={label}
+      {...(labelAccessibilityVisibility ? { labelAccessibilityVisibility } : {})}
       {...(checked ? { checked: true } : {})}
+      {...(indeterminate ? { indeterminate: true } : {})}
       {...(disabled ? { disabled: true } : {})}
     />
+  );
+}
+
+/**
+ * One Matrixify-style collapsible column group: a group checkbox (toggles
+ * the whole group, indeterminate when partial), a column count badge, and a
+ * chevron that reveals the individual column checkboxes.
+ */
+function ColumnGroup({ group, selected, onToggleField, onSetGroup, disabled }) {
+  const [open, setOpen] = useState(false);
+  const lock = disabled ? true : undefined;
+  const selCount = group.fields.reduce((n, f) => n + (selected.includes(f) ? 1 : 0), 0);
+  const allSel = selCount === group.fields.length;
+  const someSel = selCount > 0 && !allSel;
+
+  return (
+    <div style={detailGroup}>
+      {/* Whole row toggles open (like the card header). The checkbox stops
+          click propagation so ticking the group doesn't also expand it. */}
+      <div className="eg-row" style={detailGroupRow} onClick={() => setOpen((o) => !o)}>
+        <span
+          style={{ pointerEvents: lock ? "none" : "auto" }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <PolarisCheckbox
+            label={group.label}
+            checked={allSel}
+            indeterminate={someSel}
+            onChange={(v) => onSetGroup(group.fields, v)}
+            disabled={disabled}
+          />
+        </span>
+        {group.speed && (
+          <span
+            style={{
+              ...speedBadge,
+              background: "#fbe6a2",
+            }}
+          >
+            {group.speed}
+          </span>
+        )}
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: ".4rem" }}>
+          {selCount > 0 && <s-badge>{selCount} columns</s-badge>}
+          <s-button
+            variant="tertiary"
+            icon={open ? "chevron-up" : "chevron-down"}
+            accessibilityLabel={open ? `Collapse ${group.label}` : `Expand ${group.label}`}
+            onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
+            disabled={lock}
+          />
+        </div>
+      </div>
+      {open && (
+        <div style={columnsGrid}>
+          {group.fields.map((field) => (
+            // The whole box toggles the column; the checkbox is visual-only
+            // (pointer-events disabled) so a single click never double-fires.
+            <div
+              key={field}
+              className="eg-col"
+              style={colRow}
+              onClick={() => !disabled && onToggleField(field)}
+            >
+              <span style={{ pointerEvents: "none" }}>
+                <PolarisCheckbox
+                  label={FIELD_LABELS[field] ?? field}
+                  checked={selected.includes(field)}
+                  onChange={() => onToggleField(field)}
+                  disabled={disabled}
+                />
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Light-grey placeholder, lighter than Polaris's default subdued tone.
+const PLACEHOLDER_COLOR = "#9a9ea3";
+
+/**
+ * Unsupported, best-effort override of the placeholder color. Polaris locks
+ * form-control internals inside shadow DOM with no styling prop or CSS part,
+ * so we walk the component's *open* shadow roots and inject a <style> into
+ * whichever root directly holds the native input/textarea. No-ops if a root
+ * is closed; may need revisiting across Polaris updates.
+ */
+function injectPlaceholderStyle(host) {
+  const seen = new Set();
+  const queue = [host];
+  while (queue.length) {
+    const node = queue.shift();
+    const root = node.shadowRoot;
+    if (!root || seen.has(root)) continue;
+    seen.add(root);
+    if (root.querySelector("input, textarea") && !root.querySelector("style[data-light-placeholder]")) {
+      const style = document.createElement("style");
+      style.setAttribute("data-light-placeholder", "");
+      style.textContent =
+        `input::placeholder, textarea::placeholder { color: ${PLACEHOLDER_COLOR} !important; opacity: 1; }`;
+      root.appendChild(style);
+      return true;
+    }
+    queue.push(...root.querySelectorAll("*"));
+  }
+  return false;
+}
+
+/** Applies injectPlaceholderStyle once the inner input has mounted. */
+function useLightPlaceholder(ref) {
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    let tries = 0;
+    let raf;
+    const attempt = () => {
+      if (injectPlaceholderStyle(el) || tries++ > 20) return;
+      raf = requestAnimationFrame(attempt);
+    };
+    attempt();
+    return () => raf && cancelAnimationFrame(raf);
+  }, [ref]);
+}
+
+/**
+ * Binds a Polaris form web component to React state. React's synthetic
+ * onChange doesn't bind reliably to custom-element form controls, so we
+ * attach native input/change listeners via a ref and push the value back
+ * imperatively (only when it differs, to avoid clobbering the caret).
+ */
+function useWebInput(value, onChange) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const handler = (e) => onChange(e.target.value);
+    el.addEventListener("input", handler);
+    el.addEventListener("change", handler);
+    return () => {
+      el.removeEventListener("input", handler);
+      el.removeEventListener("change", handler);
+    };
+  }, [onChange]);
+  useEffect(() => {
+    const el = ref.current;
+    if (el && el.value !== (value ?? "")) el.value = value ?? "";
+  }, [value]);
+  return ref;
+}
+
+function PolarisTextField({ label, value, onChange, placeholder, disabled, labelAccessibilityVisibility }) {
+  const ref = useWebInput(value, onChange);
+  useLightPlaceholder(ref);
+  return (
+    <s-text-field
+      ref={ref}
+      label={label}
+      {...(labelAccessibilityVisibility ? { labelAccessibilityVisibility } : {})}
+      {...(placeholder ? { placeholder } : {})}
+      {...(disabled ? { disabled: true } : {})}
+    />
+  );
+}
+
+function PolarisSelect({ label, value, onChange, options, disabled, labelAccessibilityVisibility }) {
+  const ref = useWebInput(value, onChange);
+  return (
+    <s-select
+      ref={ref}
+      label={label}
+      {...(labelAccessibilityVisibility ? { labelAccessibilityVisibility } : {})}
+      {...(disabled ? { disabled: true } : {})}
+    >
+      {options.map((o) => (
+        <s-option key={o.value} value={o.value}>{o.label}</s-option>
+      ))}
+    </s-select>
   );
 }
 
@@ -578,82 +1230,151 @@ function PolarisCheckbox({ label, checked, onChange, disabled }) {
  * Mirrors the existing single-entity controls but keyed on a per-entity
  * state slice provided by the parent.
  */
-function EntityConfigCard({ entity, state, onFilter, onToggleField, onSetFields, disabled }) {
-  const all = FIELDS_BY_ENTITY[entity] ?? PRODUCT_FIELDS;
-  const filters = FILTERS_BY_ENTITY[entity] ?? [];
+function EntityConfigCard({ entity, state, count, dynGroups = EMPTY_DYN_GROUPS, onAddFilter, onUpdateFilter, onRemoveFilter, onToggleField, onSetFields, onRemove, disabled }) {
+  const all = allFieldsFor(entity, dynGroups);
+  const groups = groupsFor(entity, dynGroups);
+  // Filter on the static columns only — the dynamic keys would bloat the
+  // dropdown with a row per location/metafield/catalog.
+  const columnOptions = (FIELDS_BY_ENTITY[entity] ?? PRODUCT_FIELDS).map((f) => ({ value: f, label: FIELD_LABELS[f] ?? f }));
+  const [open, setOpen] = useState(false);
+  const lock = disabled ? true : undefined;
+
+  // Toggle every field in a group at once, preserving canonical column order.
+  const setGroup = (fields, checked) => {
+    const set = new Set(state.selectedFields);
+    for (const f of fields) checked ? set.add(f) : set.delete(f);
+    onSetFields(all.filter((f) => set.has(f)));
+  };
 
   return (
-    <s-section heading={capitalize(entity)}>
+    <s-section>
       <s-stack direction="block" gap="base">
 
-        {/* Filters */}
-        {filters.length > 0 && (
-          <details style={detailsStyle} open>
-            <summary style={summaryStyle}>Filter rows</summary>
-            <div style={filterGrid}>
-              {filters.map((def) => (
-                <label key={def.key} style={labelStyle}>
-                  <s-text type="strong">{def.label}</s-text>
-                  {def.type === "select" ? (
-                    <select
-                      value={state.filters[def.key] ?? ""}
-                      onChange={(e) => onFilter(def.key, e.target.value)}
-                      style={selectStyle}
-                      disabled={disabled}
-                    >
-                      <option value="">Any</option>
-                      {def.options.map((o) => (
-                        <option key={o.value} value={o.value}>{o.label}</option>
-                      ))}
-                    </select>
-                  ) : (
-                    <input
-                      type={def.type === "date" ? "date" : "text"}
-                      value={state.filters[def.key] ?? ""}
-                      placeholder={def.placeholder ?? ""}
-                      onChange={(e) => onFilter(def.key, e.target.value)}
-                      style={inputStyle}
-                      disabled={disabled}
-                    />
-                  )}
-                </label>
-              ))}
-            </div>
-          </details>
-        )}
-
-        {/* Columns */}
-        <details style={detailsStyle}>
-          <summary style={summaryStyle}>
-            Columns ({state.selectedFields.length} of {all.length})
-          </summary>
-          <div style={{ display: "flex", gap: ".5rem", margin: ".75rem 0" }}>
-            <button type="button" onClick={() => onSetFields([...all])} style={smallBtn} disabled={disabled}>
-              Select all
-            </button>
-            <button type="button" onClick={() => onSetFields([])} style={smallBtn} disabled={disabled}>
-              Clear all
-            </button>
+        {/* Header: entity icon + name on the left; summary stats, an
+            expand chevron, and a remove (✕) button on the right. */}
+        <div style={cardHeader} onClick={() => setOpen((o) => !o)}>
+          {ENTITY_ICONS[entity] && <s-icon type={ENTITY_ICONS[entity]} />}
+          <span style={{ fontWeight: 700 }}>{capitalize(entity)}</span>
+          <div style={cardHeaderInfo}>
+            <s-badge tone="success">{state.selectedFields.length} of {all.length} columns</s-badge>
+            <s-badge>Total: {count != null ? count.toLocaleString() : "—"}</s-badge>
+            <s-badge>Estimate: {estimateExport(count)}</s-badge>
           </div>
-          <div style={columnsGrid}>
-            {all.map((field) => (
-              <label key={field} style={checkboxLabel}>
-                <input
-                  type="checkbox"
-                  checked={state.selectedFields.includes(field)}
-                  onChange={() => onToggleField(field)}
-                  disabled={disabled}
-                />
-                {field}
-              </label>
-            ))}
-          </div>
-        </details>
+          {/* Chevron toggles too; stops propagation so the header's own
+              onClick doesn't also fire (which would cancel the toggle). */}
+          <s-button
+            variant="tertiary"
+            icon={open ? "chevron-up" : "chevron-down"}
+            accessibilityLabel={open ? "Collapse" : "Expand"}
+            onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
+            disabled={lock}
+          />
+          {/* Remove must not toggle the header, so it stops propagation. */}
+          <s-button
+            variant="tertiary"
+            icon="x"
+            accessibilityLabel={`Remove ${capitalize(entity)}`}
+            onClick={(e) => { e.stopPropagation(); onRemove(); }}
+            disabled={lock}
+          />
+        </div>
 
-        {state.selectedFields.length === 0 && (
-          <s-banner tone="warning">
-            Select at least one column for {capitalize(entity)} or untick the entity above.
-          </s-banner>
+        {open && (
+          <>
+            {/* Select Columns — comes first, like Matrixify */}
+            <s-stack direction="block" gap="small-200">
+              <span style={sectionHeader}>Select Columns</span>
+              <div style={{ display: "flex" }}>
+                <s-button
+                  variant="secondary"
+                  onClick={() => onSetFields(state.selectedFields.length === all.length ? [] : [...all])}
+                  disabled={lock}
+                >
+                  {state.selectedFields.length === all.length ? "Clear all" : "Select all"}
+                </s-button>
+              </div>
+              <div>
+                {groups.map((group) => (
+                  <ColumnGroup
+                    key={group.label}
+                    group={group}
+                    selected={state.selectedFields}
+                    onToggleField={onToggleField}
+                    onSetGroup={setGroup}
+                    disabled={disabled}
+                  />
+                ))}
+              </div>
+            </s-stack>
+
+            {state.selectedFields.length === 0 && (
+              <s-banner tone="warning">
+                Select at least one column for {capitalize(entity)} or untick the entity above.
+              </s-banner>
+            )}
+
+            {/* Set Filters — dynamic builder: each row is column + condition +
+                value + remove. "Add filter" appends a blank row. */}
+            <s-stack direction="block" gap="small-200">
+              <span style={sectionHeader}>Set Filters</span>
+              {state.advancedFilters.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: ".5rem" }}>
+                  {state.advancedFilters.map((row) => {
+                    const valueless = VALUELESS_OPERATORS.has(row.operator);
+                    return (
+                      <div key={row.id} style={advFilterRow}>
+                        <PolarisSelect
+                          label="Column"
+                          labelAccessibilityVisibility="exclusive"
+                          value={row.column}
+                          onChange={(v) => onUpdateFilter(row.id, { column: v })}
+                          options={columnOptions}
+                          disabled={disabled}
+                        />
+                        <PolarisSelect
+                          label="Condition"
+                          labelAccessibilityVisibility="exclusive"
+                          value={row.operator}
+                          onChange={(v) => onUpdateFilter(row.id, { operator: v })}
+                          options={FILTER_OPERATORS}
+                          disabled={disabled}
+                        />
+                        <PolarisTextField
+                          label="Value"
+                          labelAccessibilityVisibility="exclusive"
+                          value={valueless ? "" : row.value}
+                          onChange={(v) => onUpdateFilter(row.id, { value: v })}
+                          placeholder={valueless ? "—" : placeholderFor(row.column)}
+                          disabled={disabled || valueless}
+                        />
+                        <s-clickable
+                          accessibilityLabel="Remove filter"
+                          onClick={() => onRemoveFilter(row.id)}
+                          disabled={lock}
+                          inlineSize="32px"
+                          blockSize="32px"
+                          borderWidth="base"
+                          borderStyle="solid"
+                          borderColor="strong"
+                          borderRadius="base"
+                          background="base"
+                        >
+                          <div style={squareIconBox}>
+                            <s-icon type="delete" />
+                          </div>
+                        </s-clickable>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <div style={{ display: "flex" }}>
+                <s-button icon="plus" variant="secondary" onClick={onAddFilter} disabled={lock}>
+                  Add filter
+                </s-button>
+              </div>
+            </s-stack>
+          </>
         )}
 
       </s-stack>
@@ -664,46 +1385,72 @@ function EntityConfigCard({ entity, state, onFilter, onToggleField, onSetFields,
 
 // ─── styles (form inputs only; layout uses Polaris) ──────────────────────────
 
-const labelStyle = {
-  display: "flex", flexDirection: "column", gap: ".35rem",
+// Pale-yellow "Slow" speed pill, styled to match an s-badge.
+const speedBadge = {
+  display: "inline-flex", alignItems: "center",
+  padding: "0 .5rem", borderRadius: "8px",
+  fontSize: ".72rem", fontWeight: 500, lineHeight: "20px",
+  color: "#5c4813",
 };
-const filterGrid = {
-  display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
-  gap: ".75rem", marginTop: ".75rem",
+// Centers the trash icon inside its fixed 32×32 square button.
+const squareIconBox = {
+  display: "flex", alignItems: "center", justifyContent: "center",
+  width: "100%", height: "100%",
+};
+// One dynamic filter row: column · condition · value · trash button.
+const advFilterRow = {
+  display: "grid",
+  gridTemplateColumns: "minmax(140px, 1.3fr) minmax(150px, 1.3fr) minmax(140px, 1.6fr) auto",
+  gap: ".5rem",
+  alignItems: "end",
 };
 const entityGrid = {
-  display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
-  gap: ".5rem",
-};
-const entityBox = {
-  border: "1px solid #c9cccf", borderRadius: 8, padding: ".5rem .65rem",
-};
-const columnsGrid = {
-  display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
+  display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
   gap: ".4rem",
 };
-const selectStyle = {
-  padding: ".45rem .6rem", borderRadius: 6,
-  border: "1px solid #c9cccf", fontSize: ".875rem", background: "#fff",
+const twoColRow = {
+  display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", alignItems: "start",
 };
-const inputStyle = { ...selectStyle };
-const smallBtn = {
-  padding: ".3rem .6rem", background: "#fff",
-  border: "1px solid #c9cccf", borderRadius: 6,
-  fontSize: ".8rem", cursor: "pointer",
+// Reserved left column in picker rows so the selected option's checkmark
+// sits to the left and all labels stay aligned (Shopify single-select look).
+const checkSlot = {
+  width: 20, display: "inline-flex", alignItems: "center", justifyContent: "center",
 };
-const checkboxLabel = {
-  display: "flex", alignItems: "center", gap: ".4rem",
-  fontSize: ".85rem", cursor: "pointer",
+const entityBox = {
+  border: "1px solid #c9cccf", borderRadius: 6, padding: ".3rem .5rem",
+  display: "flex", alignItems: "center", gap: ".3rem",
 };
-const detailsStyle = {
-  border: "1px solid #e1e3e5", borderRadius: 8, padding: ".5rem .9rem",
+const entityLabel = {
+  pointerEvents: "none", fontSize: ".8rem", whiteSpace: "nowrap",
 };
-const summaryStyle = {
-  cursor: "pointer", fontWeight: 600, fontSize: ".9rem", padding: ".25rem 0",
+const entityCount = {
+  marginLeft: "auto", pointerEvents: "none",
+  color: "#6d7175", fontSize: ".72rem", fontVariantNumeric: "tabular-nums",
 };
-const primaryBtn = {
-  padding: ".55rem 1.1rem", background: "#000", color: "#fff",
-  border: "none", borderRadius: 8,
-  fontSize: ".9rem", fontWeight: 500,
+const cardHeader = {
+  display: "flex", alignItems: "center", gap: ".5rem", cursor: "pointer",
+};
+const sectionHeader = {
+  fontSize: ".78rem", fontWeight: 600, color: "#6d7175",
+};
+const detailGroup = {
+  borderTop: "1px solid #e3e5e7",
+};
+const detailGroupRow = {
+  display: "flex", alignItems: "center", gap: ".5rem",
+  padding: ".4rem .5rem", cursor: "pointer", borderRadius: 6,
+};
+const columnsGrid = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+  gap: "0 .5rem",
+  paddingInlineStart: "1.75rem",
+  paddingBlockEnd: ".35rem",
+};
+const colRow = {
+  padding: ".2rem .5rem", borderRadius: 6, cursor: "pointer",
+};
+const cardHeaderInfo = {
+  marginLeft: "auto", display: "flex", flexDirection: "row",
+  alignItems: "center", gap: ".25rem",
 };

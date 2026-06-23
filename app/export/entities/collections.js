@@ -15,7 +15,7 @@ const COLLECTIONS_QUERY = `#graphql
       nodes {
         id title handle descriptionHtml sortOrder templateSuffix updatedAt
         productsCount { count }
-        image { url }
+        image { url altText width height }
         seo { title description }
         ruleSet {
           appliedDisjunctively

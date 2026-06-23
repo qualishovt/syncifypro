@@ -6,7 +6,13 @@
  * One row per line item — the standard convention for order CSVs.
  */
 
-import { normalizeOrder } from "../normalizer.js";
+import { buildOrderRows } from "../normalizer.js";
+
+// Orders are fetched 10 per page: each order node carries lineItems(first: 250)
+// plus transactions/refunds/fulfillments sub-entities, so the requested query
+// cost scales steeply and must stay under Shopify's 1000-point single-query
+// limit. Smaller pages = more requests, but no truncated data.
+const ORDERS_PAGE_SIZE = 10;
 
 const ORDERS_QUERY = `#graphql
   query GetOrders($first: Int!, $after: String, $query: String) {
@@ -16,78 +22,81 @@ const ORDERS_QUERY = `#graphql
         endCursor
       }
       nodes {
-        id
-        name
-        email
-        phone
-        createdAt
-        updatedAt
-        processedAt
-        cancelledAt
-        cancelReason
-        displayFinancialStatus
-        displayFulfillmentStatus
-        totalPriceSet {
-          shopMoney { amount currencyCode }
+        id name note tags email phone
+        createdAt updatedAt processedAt cancelledAt closedAt cancelReason
+        displayFinancialStatus displayFulfillmentStatus
+        currencyCode presentmentCurrencyCode
+        taxesIncluded test confirmed sourceName statusPageUrl
+        clientIp sourceIdentifier confirmationNumber
+        currentSubtotalLineItemsQuantity totalWeight
+        totalPriceSet { shopMoney { amount currencyCode } }
+        subtotalPriceSet { shopMoney { amount } }
+        totalTaxSet { shopMoney { amount } }
+        totalShippingPriceSet { shopMoney { amount } }
+        totalDiscountsSet { shopMoney { amount } }
+        currentTotalPriceSet { shopMoney { amount } }
+        totalRefundedSet { shopMoney { amount } }
+        currentTotalDutiesSet { shopMoney { amount } }
+        originalTotalDutiesSet { shopMoney { amount } }
+        currentTotalAdditionalFeesSet { shopMoney { amount } }
+        originalTotalAdditionalFeesSet { shopMoney { amount } }
+        totalReceivedSet { shopMoney { amount } }
+        netPaymentSet { shopMoney { amount } }
+        totalCapturableSet { shopMoney { amount } }
+        taxLines { title rate ratePercentage channelLiable priceSet { shopMoney { amount } } }
+        risk { recommendation assessments { riskLevel facts { description sentiment } } }
+        customerJourneySummary { lastVisit { landingPage referrerUrl source sourceType utmParameters { source medium campaign term content } } }
+        purchasingEntity { __typename ... on PurchasingCompany { company { id name } location { id name } } }
+        shippingLine { title code source originalPriceSet { shopMoney { amount } } taxLines { title rate priceSet { shopMoney { amount } } } }
+        transactions(first: 50) {
+          id kind status gateway processedAt accountNumber paymentId errorCode test
+          amountSet { shopMoney { amount currencyCode } }
+          parentTransaction { id }
         }
-        subtotalPriceSet {
-          shopMoney { amount currencyCode }
+        refunds {
+          id createdAt note
+          totalRefundedSet { shopMoney { amount currencyCode } }
+          refundLineItems(first: 5) { nodes { restockType location { name } } }
         }
-        totalTaxSet {
-          shopMoney { amount currencyCode }
+        fulfillments(first: 30) {
+          id status displayStatus createdAt updatedAt totalQuantity
+          service { handle }
+          location { name }
+          trackingInfo { company number url }
         }
-        totalShippingPriceSet {
-          shopMoney { amount currencyCode }
-        }
-        totalDiscountsSet {
-          shopMoney { amount currencyCode }
-        }
-        note
-        tags
         billingAddress {
-          firstName lastName company
-          address1 address2
-          city province zip country
-          phone
+          firstName lastName name company phone
+          address1 address2 city province provinceCode zip country countryCodeV2
         }
         shippingAddress {
-          firstName lastName company
-          address1 address2
-          city province zip country
-          phone
+          firstName lastName name company phone
+          address1 address2 city province provinceCode zip country countryCodeV2
         }
         customer {
-          id
-          firstName
-          lastName
-          email
+          id firstName lastName note state numberOfOrders taxExempt tags
+          defaultEmailAddress { emailAddress marketingState }
+          defaultPhoneNumber { phoneNumber marketingState }
+          amountSpent { amount currencyCode }
         }
         lineItems(first: 250) {
           nodes {
-            id
-            title
-            variantTitle
-            quantity
-            sku
-            vendor
-            originalUnitPriceSet {
-              shopMoney { amount currencyCode }
-            }
-            discountedUnitPriceSet {
-              shopMoney { amount currencyCode }
-            }
-            totalDiscountSet {
-              shopMoney { amount currencyCode }
-            }
-            taxable
-            requiresShipping
-            fulfillmentStatus
+            id title name variantTitle sku vendor quantity currentQuantity unfulfilledQuantity
+            requiresShipping taxable isGiftCard fulfillmentStatus
+            originalUnitPriceSet { shopMoney { amount } }
+            discountedUnitPriceSet { shopMoney { amount } }
+            discountedTotalSet { shopMoney { amount } }
+            totalDiscountSet { shopMoney { amount } }
+            taxLines { title rate ratePercentage channelLiable priceSet { shopMoney { amount } } }
+            customAttributes { key value }
             variant {
-              id
+              id sku barcode inventoryQuantity price compareAtPrice
+              inventoryItem {
+                unitCost { amount }
+                measurement { weight { value unit } }
+                countryCodeOfOrigin harmonizedSystemCode provinceCodeOfOrigin
+              }
             }
-            product {
-              id
-            }
+            product { id handle productType tags }
           }
         }
       }
@@ -109,7 +118,7 @@ export async function extractOrders(admin, { query = "status:any" } = {}) {
 
   while (hasNextPage) {
     const response = await admin.graphql(ORDERS_QUERY, {
-      variables: { first: 250, after: cursor, query },
+      variables: { first: ORDERS_PAGE_SIZE, after: cursor, query },
     });
 
     const { data, errors } = await response.json();
@@ -128,15 +137,10 @@ export async function extractOrders(admin, { query = "status:any" } = {}) {
 
     const { nodes, pageInfo } = data.orders;
 
+    // Matrixify-style multi-row: line items + transaction/refund/fulfillment
+    // rows per order, tagged by the line_type column.
     for (const order of nodes) {
-      // One row per line item — standard order CSV convention
-      if (order.lineItems.nodes.length === 0) {
-        rows.push(normalizeOrder(order, null));
-      } else {
-        for (const lineItem of order.lineItems.nodes) {
-          rows.push(normalizeOrder(order, lineItem));
-        }
-      }
+      for (const row of buildOrderRows(order)) rows.push(row);
     }
 
     hasNextPage = pageInfo.hasNextPage;

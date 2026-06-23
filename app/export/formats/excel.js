@@ -17,7 +17,7 @@
  * handles csv/json/xml; Excel is built fully in memory.
  */
 
-import { resolveColumns } from "./columns.js";
+import { resolveColumns, columnHeader } from "./columns.js";
 import { zipParts } from "./zip.js";
 
 /** @typedef {{ name: string, rows: object[], columns?: string[] }} Sheet */
@@ -114,7 +114,7 @@ function buildSheetXml(rows, cols) {
     "<sheetData>",
   ];
 
-  parts.push(rowXml(1, cols));
+  parts.push(rowXml(1, cols.map(columnHeader)));
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     parts.push(rowXml(i + 2, cols.map((c) => row[c] ?? "")));

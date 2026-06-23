@@ -69,7 +69,7 @@ export async function action({ request }) {
 
 // ─── UI ───────────────────────────────────────────────────────────────────────
 
-const ENTITIES = ["products", "orders"];
+const ENTITIES = ["products", "orders", "redirects"];
 const FORMATS  = ["csv"]; // parsers/{excel,xml,json} are stubbed; expose csv only for now
 
 export default function ImportPage() {

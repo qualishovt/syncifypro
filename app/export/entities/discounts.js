@@ -18,7 +18,13 @@ const DISCOUNTS_QUERY = `#graphql
         discount {
           __typename
           ... on DiscountCodeBasic {
-            title status startsAt endsAt usageLimit appliesOncePerCustomer asyncUsageCount
+            title summary status createdAt updatedAt startsAt endsAt
+            usageLimit appliesOncePerCustomer asyncUsageCount
+            combinesWith { orderDiscounts productDiscounts shippingDiscounts }
+            minimumRequirement { __typename
+              ... on DiscountMinimumQuantity { greaterThanOrEqualToQuantity }
+              ... on DiscountMinimumSubtotal { greaterThanOrEqualToSubtotal { amount } }
+            }
             codes(first: 10) { nodes { code } }
             customerGets { value {
               __typename
@@ -27,7 +33,12 @@ const DISCOUNTS_QUERY = `#graphql
             } }
           }
           ... on DiscountAutomaticBasic {
-            title status startsAt endsAt asyncUsageCount
+            title summary status createdAt updatedAt startsAt endsAt asyncUsageCount
+            combinesWith { orderDiscounts productDiscounts shippingDiscounts }
+            minimumRequirement { __typename
+              ... on DiscountMinimumQuantity { greaterThanOrEqualToQuantity }
+              ... on DiscountMinimumSubtotal { greaterThanOrEqualToSubtotal { amount } }
+            }
             customerGets { value {
               __typename
               ... on DiscountPercentage { percentage }
@@ -35,18 +46,24 @@ const DISCOUNTS_QUERY = `#graphql
             } }
           }
           ... on DiscountCodeFreeShipping {
-            title status startsAt endsAt usageLimit appliesOncePerCustomer asyncUsageCount
+            title summary status createdAt updatedAt startsAt endsAt
+            usageLimit appliesOncePerCustomer asyncUsageCount
+            combinesWith { orderDiscounts productDiscounts shippingDiscounts }
             codes(first: 10) { nodes { code } }
           }
           ... on DiscountAutomaticFreeShipping {
-            title status startsAt endsAt asyncUsageCount
+            title summary status createdAt updatedAt startsAt endsAt asyncUsageCount
+            combinesWith { orderDiscounts productDiscounts shippingDiscounts }
           }
           ... on DiscountCodeBxgy {
-            title status startsAt endsAt usageLimit appliesOncePerCustomer asyncUsageCount
+            title summary status createdAt updatedAt startsAt endsAt
+            usageLimit appliesOncePerCustomer asyncUsageCount
+            combinesWith { orderDiscounts productDiscounts shippingDiscounts }
             codes(first: 10) { nodes { code } }
           }
           ... on DiscountAutomaticBxgy {
-            title status startsAt endsAt asyncUsageCount
+            title summary status createdAt updatedAt startsAt endsAt asyncUsageCount
+            combinesWith { orderDiscounts productDiscounts shippingDiscounts }
           }
         }
       }

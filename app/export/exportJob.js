@@ -16,6 +16,23 @@ import { extractDiscounts }            from "./entities/discounts.js";
 import { extractPages }                from "./entities/pages.js";
 import { extractBlogs }                from "./entities/blogs.js";
 import { extractArticles }             from "./entities/articles.js";
+import { extractRedirects }            from "./entities/redirects.js";
+import { extractShop }                 from "./entities/shop.js";
+import { extractFiles }                from "./entities/files.js";
+import { extractPayouts }              from "./entities/payouts.js";
+import { extractMenus }                from "./entities/menus.js";
+import { extractCompanies }            from "./entities/companies.js";
+import { extractDraftOrders }          from "./entities/draftOrders.js";
+import { extractActivity }             from "./entities/activity.js";
+import { extractMetaobjects }          from "./entities/metaobjects.js";
+import { extractMetafields }           from "./entities/metafields.js";
+import { extractTranslations }         from "./entities/translations.js";
+import { extractLocations }            from "./entities/locations.js";
+import { extractCatalogs }             from "./entities/catalogs.js";
+import { extractMetaobjectDefinitions } from "./entities/metaobjectDefinitions.js";
+import { extractInventoryTransfers }   from "./entities/inventoryTransfers.js";
+import { extractDefinitions }          from "./entities/definitions.js";
+import { extractContent }              from "./entities/content.js";
 import { submitBulkOperation,
          getEntityCount,
          BULK_ENTITIES }               from "./entities/bulk.js";
@@ -32,7 +49,11 @@ import { buildProductQuery,
          buildCustomerQuery,
          buildCollectionQuery,
          buildDiscountQuery,
-         buildContentQuery }           from "./filters.js";
+         buildContentQuery,
+         buildRedirectQuery,
+         buildFileQuery,
+         buildCompanyQuery,
+         buildDraftOrderQuery }        from "./filters.js";
 
 /** Threshold above which we switch to bulk operations */
 const BULK_THRESHOLD = 10_000;
@@ -56,10 +77,29 @@ const ENTITY_EXTRACTORS = {
   orders:      extractOrders,
   customers:   extractCustomers,
   collections: extractCollections,
+  smart_collections:  extractCollections,
+  custom_collections: extractCollections,
   discounts:   extractDiscounts,
   pages:       extractPages,
   blogs:       extractBlogs,
   articles:    extractArticles,
+  redirects:   extractRedirects,
+  shop:        extractShop,
+  files:       extractFiles,
+  payouts:     extractPayouts,
+  menus:       extractMenus,
+  companies:   extractCompanies,
+  draft_orders: extractDraftOrders,
+  activity:    extractActivity,
+  metaobjects: extractMetaobjects,
+  metafields:  extractMetafields,
+  translations: extractTranslations,
+  locations:   extractLocations,
+  catalogs:    extractCatalogs,
+  metaobject_definitions: extractMetaobjectDefinitions,
+  inventory_transfers: extractInventoryTransfers,
+  definitions: extractDefinitions,
+  content:     extractContent,
 };
 
 /** Maps entity → function that builds its Shopify search query */
@@ -68,10 +108,17 @@ const QUERY_BUILDERS = {
   orders:      buildOrderQuery,
   customers:   buildCustomerQuery,
   collections: buildCollectionQuery,
+  smart_collections:  (f) => buildCollectionQuery({ ...f, collectionType: "smart" }),
+  custom_collections: (f) => buildCollectionQuery({ ...f, collectionType: "custom" }),
   discounts:   buildDiscountQuery,
   pages:       buildContentQuery,
   blogs:       buildContentQuery,
   articles:    buildContentQuery,
+  redirects:   buildRedirectQuery,
+  files:       buildFileQuery,
+  companies:   buildCompanyQuery,
+  draft_orders: buildDraftOrderQuery,
+  content:     buildContentQuery,
 };
 
 const MIME_TYPES = {
@@ -143,7 +190,7 @@ async function runDirectExport({ admin, shop, entity, format, filename, mimeType
   const extractor = ENTITY_EXTRACTORS[entity];
   if (!extractor) throw new Error(`Unknown entity: ${entity}`);
 
-  const rows   = await extractor(admin, { query });
+  const rows   = await extractor(admin, { query, fields, shop }); // fields toggles the products inventory fetch; shop used by Activity
   const buffer = await adapter(rows, fields); // fields = column selection (undefined = all)
 
   const { signedUrl, r2Key, expiresAt } = await uploadToR2({
@@ -163,8 +210,9 @@ async function runBulkExport({ admin, shop, entity, format, filename, query, fie
     fields: fields ? fields.join(",") : null,
   });
 
-  // 2. Submit the bulk operation to Shopify with the row filter applied
-  const { bulkOperationId } = await submitBulkOperation(admin, { entity, query });
+  // 2. Submit the bulk operation to Shopify with the row filter applied.
+  //    `fields` toggles the per-location inventory sub-selection.
+  const { bulkOperationId } = await submitBulkOperation(admin, { entity, query, fields });
 
   // 3. Store the bulk operation ID so the webhook can find this job
   await markJobRunning({ id: job.id, bulkOperationId });
@@ -207,7 +255,7 @@ export async function runMultiEntityExport({ admin, shop, specs, format }) {
     const buildQuery = QUERY_BUILDERS[spec.entity];
     const query      = buildQuery ? buildQuery(spec.filters ?? {}) : "";
     const extractor  = ENTITY_EXTRACTORS[spec.entity];
-    const rows       = await extractor(admin, { query });
+    const rows       = await extractor(admin, { query, fields: spec.fields, shop });
     results.push({ entity: spec.entity, rows, fields: spec.fields });
   }
 

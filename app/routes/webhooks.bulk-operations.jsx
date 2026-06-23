@@ -27,7 +27,7 @@ import { processBulkOperation } from "../workers/bulkOperationWorker.js";
 export async function action({ request }) {
   // authenticate.webhook verifies the HMAC signature —
   // rejects requests that didn't come from Shopify
-  const { topic, shop, payload } = await authenticate.webhook(request);
+  const { topic, shop, payload, admin } = await authenticate.webhook(request);
 
   if (topic !== "BULK_OPERATIONS_FINISH") {
     return new Response("Unhandled topic", { status: 200 });
@@ -68,6 +68,7 @@ export async function action({ request }) {
     format:   job.format,
     shop,
     fields:   job.fields ? job.fields.split(",") : undefined,
+    admin, // for fetching catalog prices to join into product rows
   }).catch((err) => {
     console.error(`[bulkOperationWorker] job ${job.id} failed:`, err.message);
   });

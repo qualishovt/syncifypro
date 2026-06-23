@@ -6,7 +6,7 @@
  * so a JSON export round-trips through the same importer as the CSV.
  */
 
-import { resolveColumns } from "./columns.js";
+import { resolveColumns, columnHeader } from "./columns.js";
 
 /**
  * Serialize rows to a pretty-printed JSON Buffer.
@@ -20,7 +20,7 @@ export function toJSON(rows, columns) {
 
   const projected = rows.map((row) => {
     const obj = {};
-    for (const col of cols) obj[col] = row[col] ?? "";
+    for (const col of cols) obj[columnHeader(col)] = row[col] ?? "";
     return obj;
   });
 
