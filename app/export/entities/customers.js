@@ -21,6 +21,7 @@ const CUSTOMERS_QUERY = `#graphql
       nodes {
         id firstName lastName note tags locale taxExempt verifiedEmail state
         createdAt updatedAt numberOfOrders multipassIdentifier
+        taxExemptions dataSaleOptOut lifetimeDuration productSubscriberStatus
         amountSpent { amount currencyCode }
         defaultEmailAddress { emailAddress marketingState marketingOptInLevel marketingUpdatedAt }
         defaultPhoneNumber { phoneNumber marketingState marketingOptInLevel marketingUpdatedAt marketingCollectedFrom }
@@ -36,10 +37,11 @@ const CUSTOMERS_QUERY = `#graphql
   }
 `;
 
-export async function extractCustomers(admin, { query = "" } = {}) {
+export async function extractCustomers(admin, { query = "", onProgress } = {}) {
   const rows = [];
   let cursor = null;
   let hasNextPage = true;
+  let processed = 0;
 
   while (hasNextPage) {
     const response = await admin.graphql(CUSTOMERS_QUERY, {
@@ -53,6 +55,9 @@ export async function extractCustomers(admin, { query = "" } = {}) {
 
     const { nodes, pageInfo } = data.customers;
     for (const customer of nodes) rows.push(normalizeCustomer(customer));
+
+    processed += nodes.length;
+    onProgress?.(processed);
 
     hasNextPage = pageInfo.hasNextPage;
     cursor = pageInfo.endCursor;

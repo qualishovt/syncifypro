@@ -38,10 +38,11 @@ const DRAFT_ORDERS_QUERY = `#graphql
   }
 `;
 
-export async function extractDraftOrders(admin, { query = "" } = {}) {
+export async function extractDraftOrders(admin, { query = "", onProgress } = {}) {
   const rows = [];
   let cursor = null;
   let hasNextPage = true;
+  let processed = 0;
 
   while (hasNextPage) {
     const response = await admin.graphql(DRAFT_ORDERS_QUERY, {
@@ -60,6 +61,8 @@ export async function extractDraftOrders(admin, { query = "" } = {}) {
       else for (const lineItem of items) rows.push(normalizeDraftOrder(draft, lineItem));
     }
 
+    processed += nodes.length;
+    onProgress?.(processed);
     hasNextPage = pageInfo.hasNextPage;
     cursor = pageInfo.endCursor;
   }

@@ -71,10 +71,11 @@ const DISCOUNTS_QUERY = `#graphql
   }
 `;
 
-export async function extractDiscounts(admin, { query = "" } = {}) {
+export async function extractDiscounts(admin, { query = "", onProgress } = {}) {
   const rows = [];
   let cursor = null;
   let hasNextPage = true;
+  let processed = 0;
 
   while (hasNextPage) {
     const response = await admin.graphql(DISCOUNTS_QUERY, {
@@ -89,6 +90,8 @@ export async function extractDiscounts(admin, { query = "" } = {}) {
     const { nodes, pageInfo } = data.discountNodes;
     for (const node of nodes) rows.push(normalizeDiscount(node));
 
+    processed += nodes.length;
+    onProgress?.(processed);
     hasNextPage = pageInfo.hasNextPage;
     cursor = pageInfo.endCursor;
   }

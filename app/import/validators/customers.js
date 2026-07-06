@@ -1,60 +1,66 @@
 /**
  * import/validators/customers.js
  *
- * Validates parsed customer rows. Returns { valid, errors }.
- * NEW/UPDATE/MERGE need an email (or customer_id for updates); DELETE needs
- * customer_id. Note: the default address is NOT imported (Shopify deprecated
- * CustomerInput.addresses — needs the dedicated address mutations).
+ * Record-aware validation for customer imports. Rows arrive header-normalized;
+ * each customer is one record (default address inlined). Valid rows pass
+ * through UNCHANGED — the customerSet input builder does its own coercion.
+ *
+ * Command drives the requirements:
+ *   - DELETE needs a customer id or email (to look one up).
+ *   - Create/update needs an email (customerSet upserts/creates by email) or an
+ *     existing id.
  */
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const MARKETING_STATES = ["SUBSCRIBED", "NOT_SUBSCRIBED", "PENDING", "UNSUBSCRIBED", "REDACTED", ""];
+import { groupRecords, topRow } from "../assemble.js";
+import { parseCommand, COMMAND } from "../command.js";
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * @param {object[]} rows - header-normalized rows
+ * @returns {{ valid: object[], errors: Array<{ row: number, field: string, message: string }> }}
+ */
 export function validateCustomerRows(rows) {
   const valid = [];
   const errors = [];
 
-  rows.forEach((row, idx) => {
-    const rowNum = idx + 2;
-    const rowErrors = [];
-    const command = (row.command || "").trim().toUpperCase() || (row.customer_id?.trim() ? "UPDATE" : "NEW");
+  let rowNum = 2; // row 1 is the header
+  for (const group of groupRecords(rows)) {
+    const top = topRow(group);
+    const e = [];
 
-    if (command === "IGNORE") return;
+    let command;
+    try {
+      command = parseCommand(top.command);
+    } catch (err) {
+      e.push({ row: rowNum, field: "command", message: err.message });
+    }
 
-    if (command === "DELETE") {
-      if (!row.customer_id?.trim()) {
-        rowErrors.push({ row: rowNum, field: "customer_id", message: '"customer_id" is required to DELETE' });
+    const hasId = Boolean(str(top.customer_id));
+    const email = str(top.email);
+
+    if (command === COMMAND.DELETE) {
+      if (!hasId && !email) {
+        e.push({ row: rowNum, field: "customer_id", message: "DELETE needs a customer ID or email" });
       }
-    } else {
-      if (!row.customer_id?.trim() && !row.email?.trim()) {
-        rowErrors.push({ row: rowNum, field: "email", message: "Either email or customer_id is required" });
+    } else if (command !== COMMAND.IGNORE) {
+      if (!email && !hasId) {
+        e.push({ row: rowNum, field: "email", message: "Customer needs an email, or an ID to update" });
       }
-      if (row.email && !EMAIL_RE.test(row.email)) {
-        rowErrors.push({ row: rowNum, field: "email", message: `Invalid email "${row.email}"` });
-      }
-      if (row.email_marketing_state && !MARKETING_STATES.includes(row.email_marketing_state.toUpperCase())) {
-        rowErrors.push({ row: rowNum, field: "email_marketing_state", message: `Invalid email marketing state "${row.email_marketing_state}"` });
+      if (email && !EMAIL_RE.test(email)) {
+        e.push({ row: rowNum, field: "email", message: `Invalid email "${top.email}"` });
       }
     }
 
-    if (rowErrors.length) {
-      errors.push(...rowErrors);
-    } else {
-      valid.push({
-        command,
-        customer_id: row.customer_id?.trim() || "",
-        email:       row.email?.trim() || "",
-        first_name:  row.first_name?.trim() || "",
-        last_name:   row.last_name?.trim() || "",
-        phone:       row.phone?.trim() || "",
-        locale:      row.locale?.trim() || "",
-        note:        row.note?.trim() || "",
-        tax_exempt:  /^(true|yes|1)$/i.test(row.tax_exempt || ""),
-        tags:        row.tags ? row.tags.split(",").map((t) => t.trim()).filter(Boolean) : [],
-        email_marketing_state: row.email_marketing_state?.trim().toUpperCase() || "",
-      });
-    }
-  });
+    if (e.length) errors.push(...e);
+    else valid.push(...group);
+
+    rowNum += group.length;
+  }
 
   return { valid, errors };
+}
+
+function str(v) {
+  return String(v ?? "").trim();
 }

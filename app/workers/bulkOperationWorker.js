@@ -33,6 +33,7 @@ import { columnHeader } from "../export/formats/columns.js";
 import { fetchCatalogData } from "../export/entities/catalogPrices.js";
 import { isCatalogColumn } from "../export/catalogColumns.js";
 import { markJobComplete, markJobFailed } from "../db/bulkExportJob.server.js";
+import { describeR2Error } from "../export/delivery/r2.js";
 
 /** Minimum R2 multipart chunk size — 5MB (R2's minimum) */
 const CHUNK_SIZE = 5 * 1024 * 1024;
@@ -217,7 +218,7 @@ export async function processBulkOperation({ jobId, jsonlUrl, entity, format, sh
       ).catch(() => {}); // don't throw if abort also fails
     }
 
-    await markJobFailed({ id: jobId, errorMessage: err.message });
+    await markJobFailed({ id: jobId, errorMessage: describeR2Error(err, bucket) ?? err.message });
     throw err;
   }
 }

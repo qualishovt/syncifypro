@@ -3,11 +3,12 @@
 client_id = "eb67b39ada94a4cae1ed894e02c6b6a1"
 application_url = "https://example.com"
 embedded = true
-name = "Exportify + Importify"
+name = "SyncifyPro"
+handle = "syncifypro"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "write_products,write_metaobjects,write_metaobject_definitions,read_orders,read_all_orders,read_customers,write_customers,read_discounts,read_content,read_inventory,read_locations,read_files,read_companies,read_draft_orders,read_shopify_payments_payouts,read_shopify_payments_accounts,read_translations,read_locales,read_online_store_navigation,write_online_store_navigation,read_inventory_transfers,read_store_credit_accounts"
+scopes = "write_products,write_metaobjects,write_metaobject_definitions,read_orders,read_all_orders,write_orders,read_customers,write_customers,read_discounts,read_content,read_inventory,write_inventory,read_shipping,read_locations,read_files,read_companies,read_draft_orders,read_shopify_payments_payouts,read_shopify_payments_accounts,read_translations,read_locales,read_online_store_navigation,write_online_store_navigation,read_inventory_transfers,read_store_credit_accounts,read_publications,write_publications"
 
 [product.metafields.app.demo_info]
 type = "single_line_text_field"

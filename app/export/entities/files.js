@@ -22,10 +22,11 @@ const FILES_QUERY = `#graphql
   }
 `;
 
-export async function extractFiles(admin, { query = "" } = {}) {
+export async function extractFiles(admin, { query = "", onProgress } = {}) {
   const rows = [];
   let cursor = null;
   let hasNextPage = true;
+  let processed = 0;
 
   while (hasNextPage) {
     const response = await admin.graphql(FILES_QUERY, {
@@ -40,6 +41,8 @@ export async function extractFiles(admin, { query = "" } = {}) {
     const { nodes, pageInfo } = data.files;
     for (const file of nodes) rows.push(normalizeFile(file));
 
+    processed += nodes.length;
+    onProgress?.(processed);
     hasNextPage = pageInfo.hasNextPage;
     cursor = pageInfo.endCursor;
   }

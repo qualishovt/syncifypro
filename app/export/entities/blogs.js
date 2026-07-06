@@ -19,10 +19,11 @@ const BLOGS_QUERY = `#graphql
   }
 `;
 
-export async function extractBlogs(admin, { query = "" } = {}) {
+export async function extractBlogs(admin, { query = "", onProgress } = {}) {
   const rows = [];
   let cursor = null;
   let hasNextPage = true;
+  let processed = 0;
 
   while (hasNextPage) {
     const response = await admin.graphql(BLOGS_QUERY, {
@@ -37,6 +38,8 @@ export async function extractBlogs(admin, { query = "" } = {}) {
     const { nodes, pageInfo } = data.blogs;
     for (const blog of nodes) rows.push(normalizeBlog(blog));
 
+    processed += nodes.length;
+    onProgress?.(processed);
     hasNextPage = pageInfo.hasNextPage;
     cursor = pageInfo.endCursor;
   }

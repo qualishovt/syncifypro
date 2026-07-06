@@ -16,9 +16,12 @@ export default function App() {
   return (
     <AppProvider embedded apiKey={apiKey}>
       <s-app-nav>
-        <s-link href="/app">Home</s-link>
-        <s-link href="/app/export">Export</s-link>
-        <s-link href="/app/import">Import</s-link>
+        {/* rel="home" marks /app as the home route AND hides this link from the
+            rendered menu — the app name "SyncifyPro" in the sidebar already links
+            here. The home shows Export + Import entry cards; each tool opens on
+            its own page (/app/export, /app/import) with a "SyncifyPro > …"
+            breadcrumb, so they aren't separate nav items. */}
+        <s-link href="/app" rel="home">Home</s-link>
         <s-link href="/app/settings">Settings</s-link>
       </s-app-nav>
       <Outlet />

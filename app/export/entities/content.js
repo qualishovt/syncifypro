@@ -16,15 +16,18 @@ const BLANK = {
   template_suffix: "", created_at: "", updated_at: "",
 };
 
-export async function extractContent(admin, { query = "" } = {}) {
-  const pages = (await extractPages(admin, { query })).map((p) => ({
+export async function extractContent(admin, { query = "", onProgress } = {}) {
+  let processed = 0;
+  const tick = onProgress ? (n) => onProgress(processed + n) : undefined;
+  const pages = (await extractPages(admin, { query, onProgress: tick })).map((p) => ({
     ...BLANK,
     content_type: "page",
     id: p.page_id, title: p.title, handle: p.handle, body_html: p.body_html,
     summary: p.body_summary, published: p.published, published_at: p.published_at,
     template_suffix: p.template_suffix, created_at: p.created_at, updated_at: p.updated_at,
   }));
-  const articles = (await extractArticles(admin, { query })).map((a) => ({
+  processed += pages.length;
+  const articles = (await extractArticles(admin, { query, onProgress: tick })).map((a) => ({
     ...BLANK,
     content_type: "article",
     id: a.article_id, title: a.title, handle: a.handle, body_html: a.body_html,

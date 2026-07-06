@@ -560,6 +560,10 @@ export function normalizeCustomer(customer) {
     note:              customer.note ?? "",
     verified_email:    customer.verifiedEmail ?? "",
     tax_exempt:        customer.taxExempt ?? "",
+    tax_exemptions:    (customer.taxExemptions ?? []).join(", "),
+    data_sale_opt_out: customer.dataSaleOptOut ?? "",
+    lifetime_duration: customer.lifetimeDuration ?? "",
+    product_subscriber_status: customer.productSubscriberStatus ?? "",
     tags:              (customer.tags ?? []).join(", "),
     tags_command:      "", // import directive
     total_spent:       customer.amountSpent?.amount ?? "",

@@ -9,8 +9,8 @@ generator client {
 // enough when changing adapters.
 // See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
 datasource db {
-  provider = "sqlite"
-  url      = "file:dev.sqlite"
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model Session {
@@ -33,9 +33,47 @@ model Session {
   refreshTokenExpires DateTime?
 }
 
+model BulkImportJob {
+  id              String    @id @default(cuid())
+  shop            String
+  // Human-friendly per-shop job number, SHARED with BulkExportJob (one sequence
+  // across imports + exports) so the combined activity list never repeats a #.
+  // Assigned at creation; nullable for rows created before this field existed.
+  number          Int?
+  // Comma-list of the entities detected across the file's sheets (display only).
+  entity          String
+  format          String
+  status          String    @default("pending")
+  // pending | running | complete | failed
+  // Original uploaded filename (for display + results naming).
+  filename        String?
+  // R2 key of the staged upload the worker downloads to do the import.
+  sourceR2Key     String?
+  // Live progress for the determinate bar: records written vs. total importable.
+  progressCurrent Int?
+  progressTotal   Int?
+  // Outcome counts, summed across sheets.
+  created         Int       @default(0)
+  updated         Int       @default(0)
+  deleted         Int       @default(0)
+  failed          Int       @default(0)
+  // Results workbook (per-row status) uploaded to R2 on completion.
+  resultR2Key     String?
+  resultUrl       String?
+  resultUrlExpiry DateTime?
+  errorMessage    String?
+  createdAt       DateTime  @default(now())
+  completedAt     DateTime?
+
+  @@index([shop])
+}
+
 model BulkExportJob {
   id              String    @id @default(cuid())
   shop            String
+  // Human-friendly per-shop job number, SHARED with BulkImportJob (one sequence
+  // across imports + exports). Assigned at creation; nullable for legacy rows.
+  number          Int?
   // For multi-entity jobs `entity` is a comma-list (e.g. "products,orders")
   // used for display only; the structured spec lives in `spec`.
   entity          String
@@ -53,6 +91,11 @@ model BulkExportJob {
   signedUrl       String?
   signedUrlExpiry DateTime?
   rowCount        Int?
+  // Live progress for the determinate progress bar. progressCurrent =
+  // records processed so far; progressTotal = expected total (null when the
+  // entity has no cheap count, which the UI renders as an indeterminate bar).
+  progressCurrent Int?
+  progressTotal   Int?
   errorMessage    String?
   createdAt       DateTime  @default(now())
   completedAt     DateTime?

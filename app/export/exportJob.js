@@ -43,7 +43,12 @@ import { toExcel, toExcelWorkbook }    from "./formats/excel.js";
 import { zipParts }                    from "./formats/zip.js";
 import { uploadToR2 }                  from "./delivery/r2.js";
 import { createBulkExportJob,
-         markJobRunning }              from "../db/bulkExportJob.server.js";
+         markJobRunning,
+         markJobComplete,
+         markJobFailed,
+         updateJobProgress,
+         getJob }                      from "../db/bulkExportJob.server.js";
+import { enqueueExport }               from "../queue/exportQueue.server.js";
 import { buildProductQuery,
          buildOrderQuery,
          buildCustomerQuery,
@@ -181,12 +186,12 @@ export async function runExportJob({ admin, shop, entity, format, filters = {}, 
   }
 
   // ── Small store: direct fetch → format → upload ───────────────────────────
-  return runDirectExport({ admin, shop, entity, format, filename, mimeType, adapter, query, fields });
+  return runDirectExport({ admin, shop, entity, filename, mimeType, adapter, query, fields });
 }
 
 // ─── direct ──────────────────────────────────────────────────────────────────
 
-async function runDirectExport({ admin, shop, entity, format, filename, mimeType, adapter, query, fields }) {
+async function runDirectExport({ admin, shop, entity, filename, mimeType, adapter, query, fields }) {
   const extractor = ENTITY_EXTRACTORS[entity];
   if (!extractor) throw new Error(`Unknown entity: ${entity}`);
 
@@ -202,7 +207,7 @@ async function runDirectExport({ admin, shop, entity, format, filename, mimeType
 
 // ─── bulk ─────────────────────────────────────────────────────────────────────
 
-async function runBulkExport({ admin, shop, entity, format, filename, query, fields }) {
+async function runBulkExport({ admin, shop, entity, format, query, fields }) {
   // 1. Create a job record in DB — store the selected fields so the
   //    worker knows which columns to write when the data comes back.
   const job = await createBulkExportJob({
@@ -296,4 +301,141 @@ export async function runMultiEntityExport({ admin, shop, specs, format }) {
 
 function capitalize(s) {
   return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+// ─── tracked (in-process background) export with progress ──────────────────────
+
+/**
+ * Entry point for the progress-bar export flow. Decides between:
+ *   - Shopify bulk operations (huge single-entity streamable exports), or
+ *   - an in-process tracked job that reports determinate progress.
+ * Always returns `{ mode: "job", jobId }` (or `{ mode: "bulk", jobId }`); the
+ * UI polls the job either way.
+ */
+export async function startExport({ admin, shop, specs, format }) {
+  if (!Array.isArray(specs) || specs.length === 0) {
+    throw new Error("At least one entity must be selected.");
+  }
+
+  // Huge single-entity streamable exports still use Shopify's bulk operations
+  // (they can't be held in memory). Those poll the same job UI — just without a
+  // determinate bar, since Shopify reports no incremental progress.
+  if (specs.length === 1 && STREAMABLE_FORMATS.includes(format) && BULK_ENTITIES.includes(specs[0].entity)) {
+    const count = await safeCount(admin, specs[0].entity);
+    if (count != null && count >= BULK_THRESHOLD) {
+      const s = specs[0];
+      return runBulkExport({ admin, shop, entity: s.entity, format, query: (QUERY_BUILDERS[s.entity]?.(s.filters ?? {}) ?? ""), fields: s.fields });
+    }
+  }
+
+  return startTrackedExport({ admin, shop, specs, format });
+}
+
+/** getEntityCount, but never throws — returns null for uncountable entities. */
+async function safeCount(admin, entity) {
+  try {
+    return await getEntityCount(admin, entity);
+  } catch {
+    return null;
+  }
+}
+
+async function startTrackedExport({ admin, shop, specs, format }) {
+  // Sum the per-entity counts for the bar's total. If any entity has no cheap
+  // count, leave the total null → the UI shows an indeterminate bar.
+  let progressTotal = 0;
+  let totalKnown = true;
+  for (const s of specs) {
+    const c = await safeCount(admin, s.entity);
+    if (c == null) totalKnown = false;
+    else progressTotal += c;
+  }
+
+  const job = await createBulkExportJob({
+    shop,
+    entity: specs.map((s) => s.entity).join(","),
+    format,
+    spec: specs,
+    progressTotal: totalKnown ? progressTotal : null,
+  });
+
+  // Durable path: hand the job to pg-boss so it survives a server restart. If
+  // the queue is unavailable, fall back to processing in-process on this
+  // request so exports still work (just without restart-durability).
+  try {
+    await enqueueExport({ jobId: job.id, specs, format, shop });
+  } catch (err) {
+    console.warn("[export] queue unavailable, running in-process:", err.message);
+    processTrackedExport({ admin, shop, job, specs, format }).catch(async (e) => {
+      await markJobFailed({ id: job.id, errorMessage: e.message }).catch(() => {});
+    });
+  }
+
+  return { mode: "job", jobId: job.id };
+}
+
+/**
+ * Process a queued export by its DB id — the pg-boss worker entry point. The
+ * worker supplies an admin client reconstructed from the shop's offline
+ * session (it has no request of its own).
+ */
+export async function runExportForJob({ admin, shop, jobId, specs, format }) {
+  const job = await getJob(jobId);
+  if (!job) throw new Error(`Export job not found: ${jobId}`);
+  try {
+    await processTrackedExport({ admin, shop, job, specs, format });
+  } catch (err) {
+    await markJobFailed({ id: jobId, errorMessage: err.message }).catch(() => {});
+    throw err;
+  }
+}
+
+async function processTrackedExport({ admin, shop, job, specs, format }) {
+  await markJobRunning({ id: job.id, bulkOperationId: null });
+
+  // Extract every entity, streaming progress (records fetched) into the job.
+  let base = 0; // records completed from prior entities
+  const results = [];
+  for (const spec of specs) {
+    const query     = QUERY_BUILDERS[spec.entity] ? QUERY_BUILDERS[spec.entity](spec.filters ?? {}) : "";
+    const extractor = ENTITY_EXTRACTORS[spec.entity];
+    let entityDone  = 0;
+    const rows = await extractor(admin, {
+      query, fields: spec.fields, shop,
+      onProgress: (n) => {
+        entityDone = n;
+        updateJobProgress({ id: job.id, progressCurrent: base + n }).catch(() => {});
+      },
+    });
+    base += entityDone;
+    results.push({ entity: spec.entity, rows, fields: spec.fields });
+  }
+
+  // Bundle: single entity → one file; multiple → zip (or one Excel workbook).
+  const timestamp = new Date().toISOString().slice(0, 19).replace("T", "-").replace(/:/g, "-");
+  const rowCount = results.reduce((sum, r) => sum + r.rows.length, 0);
+  let buffer, filename, mimeType;
+
+  if (results.length === 1) {
+    const r   = results[0];
+    const ext = EXTENSION[format];
+    buffer    = await FORMAT_ADAPTERS[format](r.rows, r.fields);
+    filename  = `${r.entity}-${timestamp}.${ext}`;
+    mimeType  = MIME_TYPES[format] ?? "application/octet-stream";
+  } else if (format === "excel") {
+    buffer   = toExcelWorkbook(results.map((r) => ({ name: capitalize(r.entity), rows: r.rows, columns: r.fields })));
+    filename = `export-${timestamp}.xlsx`;
+    mimeType = MIME_TYPES.excel;
+  } else {
+    const ext = EXTENSION[format];
+    buffer   = zipParts(results.map((r) => ({ name: `${r.entity}.${ext}`, data: FORMAT_ADAPTERS[format](r.rows, r.fields) })));
+    filename = `export-${timestamp}.zip`;
+    mimeType = MIME_TYPES.zip;
+  }
+
+  const { signedUrl, r2Key, expiresAt } = await uploadToR2({ buffer, filename, mimeType, shopId: shop });
+
+  // Snap the bar to 100% and mark done.
+  await updateJobProgress({ id: job.id, progressCurrent: job.progressTotal ?? base }).catch(() => {});
+  await markJobComplete({ id: job.id, r2Key, signedUrl, signedUrlExpiry: expiresAt, rowCount });
 }

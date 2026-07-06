@@ -4,8 +4,13 @@ import { ServerRouter } from "react-router";
 import { createReadableStreamFromReadable } from "@react-router/node";
 import { isbot } from "isbot";
 import { addDocumentResponseHeaders } from "./shopify.server";
+import { initBackground } from "./queue/init.server.js";
 
 export const streamTimeout = 5000;
+
+// Runs once at server startup: clean up orphaned jobs + start the pg-boss
+// export worker so queued jobs are processed (and survive restarts).
+initBackground();
 
 export default async function handleRequest(
   request,

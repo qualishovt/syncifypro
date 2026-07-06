@@ -30,10 +30,11 @@ const COMPANIES_QUERY = `#graphql
   }
 `;
 
-export async function extractCompanies(admin, { query = "" } = {}) {
+export async function extractCompanies(admin, { query = "", onProgress } = {}) {
   const rows = [];
   let cursor = null;
   let hasNextPage = true;
+  let processed = 0;
 
   while (hasNextPage) {
     const response = await admin.graphql(COMPANIES_QUERY, {
@@ -48,6 +49,8 @@ export async function extractCompanies(admin, { query = "" } = {}) {
     const { nodes, pageInfo } = data.companies;
     for (const company of nodes) rows.push(...buildCompanyRows(company));
 
+    processed += nodes.length;
+    onProgress?.(processed);
     hasNextPage = pageInfo.hasNextPage;
     cursor = pageInfo.endCursor;
   }

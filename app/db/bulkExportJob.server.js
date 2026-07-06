@@ -29,25 +29,41 @@
  */
 
 import db from "../db.server.js";
+import { nextJobNumber } from "./jobNumber.server.js";
 
-/**
- * Create a new pending bulk export job record.
- */
 /**
  * Create a new pending bulk export job record.
  * `spec` is a JSON array of `{ entity, filters, fields }` (multi-entity);
  * `entity` is a comma-list of the entity slugs for display.
  */
 export async function createBulkExportJob({
-  shop, entity, format, fields = null, spec = null, filename = null,
+  shop, entity, format, fields = null, spec = null, filename = null, progressTotal = null,
 }) {
-  return db.bulkExportJob.create({
-    data: {
-      shop, entity, format, fields, status: "pending",
-      spec:     spec ? JSON.stringify(spec) : null,
-      filename: filename ?? null,
-    },
+  // Assign the shared per-shop job number + create in one transaction.
+  return db.$transaction(async (tx) => {
+    const number = await nextJobNumber(tx, shop);
+    return tx.bulkExportJob.create({
+      data: {
+        shop, entity, format, fields, status: "pending", number,
+        spec:     spec ? JSON.stringify(spec) : null,
+        filename: filename ?? null,
+        progressCurrent: 0,
+        progressTotal,
+      },
+    });
   });
+}
+
+/**
+ * Update a running job's progress counter (records processed so far, and
+ * optionally the expected total). Backs the determinate progress bar.
+ */
+export async function updateJobProgress({ id, progressCurrent, progressTotal }) {
+  const data = {};
+  if (progressCurrent != null) data.progressCurrent = progressCurrent;
+  if (progressTotal != null) data.progressTotal = progressTotal;
+  if (Object.keys(data).length === 0) return null;
+  return db.bulkExportJob.update({ where: { id }, data });
 }
 
 /**
@@ -113,4 +129,38 @@ export async function getJobsForShop(shop, limit = 20) {
  */
 export async function getJob(id) {
   return db.bulkExportJob.findUnique({ where: { id } });
+}
+
+/**
+ * Total number of export jobs for a shop — backs the "activity" entity count
+ * (an app-owned entity with no Shopify Admin count query).
+ */
+export async function countJobsForShop(shop) {
+  return db.bulkExportJob.count({ where: { shop } });
+}
+
+/**
+ * Fail orphaned in-process jobs — ones left pending/running past the cutoff
+ * because the server restarted mid-export (the in-process failure mode). Only
+ * targets jobs WITHOUT a bulkOperationId; Shopify bulk-operation jobs
+ * (bulkOperationId set) legitimately run long and are finished by their
+ * webhook, so they're left alone. Run once at server startup.
+ *
+ * @returns {Promise<number>} how many jobs were marked failed
+ */
+export async function failStaleJobs({ olderThanMinutes = 30 } = {}) {
+  const cutoff = new Date(Date.now() - olderThanMinutes * 60_000);
+  const { count } = await db.bulkExportJob.updateMany({
+    where: {
+      status: { in: ["pending", "running"] },
+      bulkOperationId: null,
+      createdAt: { lt: cutoff },
+    },
+    data: {
+      status: "failed",
+      errorMessage: "Export didn't finish (server restarted before it completed).",
+      completedAt: new Date(),
+    },
+  });
+  return count;
 }

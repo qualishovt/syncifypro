@@ -1,14 +1,17 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npm run *)",
+      "Bash",
+      "PowerShell",
+      "Bash(*)",
+      "Bash(npm *)",
       "Bash(npx *)",
-      "Bash(git *)",
+      "Bash(npx eslint *)",
+      "PowerShell(*)",
+      "WebFetch(*)",
+      "WebSearch",
       "Read(//c/Users/tehra/.claude/projects/**)",
-      "mcp__shopify-dev-mcp__validate_graphql_codeblocks",
-      "mcp__shopify-dev-mcp__validate_component_codeblocks",
-      "mcp__shopify-dev-mcp__learn_shopify_api",
-      "mcp__shopify-dev-mcp__search_docs_chunks",
+      "mcp__shopify-dev-mcp__*",
       "Skill(shopify-plugin:shopify-use-shopify-cli)",
       "Skill(shopify-plugin:shopify-use-shopify-cli:*)"
     ],

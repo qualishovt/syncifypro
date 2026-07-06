@@ -1,95 +1,100 @@
 /**
  * import/validators/orders.js
  *
- * Validates parsed order CSV rows before they're sent to Shopify.
- * Returns { valid: [], errors: [] }.
+ * Record-aware validation for order imports. Rows arrive header-normalized and
+ * are grouped into orders first (top_row on the first line-item row); each
+ * order is validated as a whole. Valid rows pass through UNCHANGED — the order
+ * input builder does its own coercion.
  *
- * Note: Shopify's Admin API does not allow creating orders via
- * orderCreate in most flows — it's typically used for draft orders
- * or order editing. This validator reflects that: it's designed
- * for updating existing orders (add note, tags, cancel reason etc.)
- * rather than creating new ones from scratch.
+ * Command drives the requirements:
+ *   - DELETE needs only an order id.
+ *   - NEW / create (no id) needs at least one line item.
+ *   - MERGE/UPDATE on an existing order is a light field update.
  */
 
-const VALID_FINANCIAL_STATUSES = [
+import { groupRecords, topRow } from "../assemble.js";
+import { parseCommand, COMMAND } from "../command.js";
+
+const VALID_FINANCIAL = new Set([
   "PENDING", "AUTHORIZED", "PARTIALLY_PAID", "PAID", "EXPIRED",
   "PARTIALLY_REFUNDED", "REFUNDED", "VOIDED",
-];
-
-const VALID_CANCEL_REASONS = [
-  "CUSTOMER", "FRAUD", "INVENTORY", "DECLINED", "OTHER", "",
-];
+]);
 
 /**
- * @param {object[]} rows - parsed CSV rows (raw strings)
+ * @param {object[]} rows - header-normalized rows
  * @returns {{ valid: object[], errors: Array<{ row: number, field: string, message: string }> }}
  */
 export function validateOrderRows(rows) {
-  const valid  = [];
+  const valid = [];
   const errors = [];
 
-  rows.forEach((row, idx) => {
-    const rowNum = idx + 2; // +2 because row 1 is header
-    const rowErrors = [];
+  let rowNum = 2; // row 1 is the header
+  for (const group of groupRecords(rows)) {
+    const top = topRow(group);
+    const e = [];
 
-    // ── order_id required for updates ────────────────────────────
-    if (!row.order_id?.trim()) {
-      rowErrors.push({ row: rowNum, field: "order_id", message: '"order_id" is required' });
+    let command;
+    try {
+      command = parseCommand(top.command);
+    } catch (err) {
+      e.push({ row: rowNum, field: "command", message: err.message });
     }
 
-    // ── financial_status ──────────────────────────────────────────
-    if (row.financial_status && !VALID_FINANCIAL_STATUSES.includes(row.financial_status.toUpperCase())) {
-      rowErrors.push({
-        row: rowNum,
-        field: "financial_status",
-        message: `Invalid financial status "${row.financial_status}". Must be one of: ${VALID_FINANCIAL_STATUSES.join(", ")}`,
+    const hasId = Boolean(str(top.order_id));
+
+    if (command === COMMAND.DELETE) {
+      if (!hasId) e.push({ row: rowNum, field: "order_id", message: "DELETE needs an order ID" });
+    } else if (command !== COMMAND.IGNORE) {
+      const isCreate = !hasId || command === COMMAND.NEW;
+
+      if (isCreate) {
+        const lineItems = group.filter((r) => (r.line_type || "Line Item") === "Line Item")
+          .filter((r) => str(r.line_item_variant_id) || str(r.line_item_title) || str(r.line_item_name));
+        if (lineItems.length === 0) {
+          e.push({ row: rowNum, field: "line_item_title", message: "New order needs at least one line item (variant ID or title)" });
+        }
+      }
+
+      if (str(top.financial_status) && !VALID_FINANCIAL.has(str(top.financial_status).toUpperCase())) {
+        e.push({ row: rowNum, field: "financial_status", message: `Invalid financial status "${top.financial_status}"` });
+      }
+      if (str(top.email) && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(str(top.email))) {
+        e.push({ row: rowNum, field: "email", message: `Invalid email "${top.email}"` });
+      }
+
+      group.forEach((row, i) => {
+        const rn = rowNum + i;
+        integer(row.line_item_quantity, "line_item_quantity", rn, e);
+        numeric(row.line_item_price, "line_item_price", rn, e);
+        numeric(row.transaction_amount, "transaction_amount", rn, e);
       });
     }
 
-    // ── cancel_reason ─────────────────────────────────────────────
-    if (row.cancel_reason && !VALID_CANCEL_REASONS.includes(row.cancel_reason.toUpperCase())) {
-      rowErrors.push({
-        row: rowNum,
-        field: "cancel_reason",
-        message: `Invalid cancel reason "${row.cancel_reason}". Must be one of: ${VALID_CANCEL_REASONS.filter(Boolean).join(", ")}`,
-      });
-    }
+    if (e.length) errors.push(...e);
+    else valid.push(...group);
 
-    // ── email format ─────────────────────────────────────────────
-    if (row.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.email)) {
-      rowErrors.push({ row: rowNum, field: "email", message: `Invalid email address "${row.email}"` });
-    }
-
-    // ── line item quantity ────────────────────────────────────────
-    if (row.line_item_quantity !== "" && !Number.isInteger(Number(row.line_item_quantity))) {
-      rowErrors.push({ row: rowNum, field: "line_item_quantity", message: "Line item quantity must be a whole number" });
-    }
-
-    // ── line item price ───────────────────────────────────────────
-    if (row.line_item_price && isNaN(parseFloat(row.line_item_price))) {
-      rowErrors.push({ row: rowNum, field: "line_item_price", message: "Line item price must be a number" });
-    }
-
-    if (rowErrors.length > 0) {
-      errors.push(...rowErrors);
-    } else {
-      valid.push(coerce(row));
-    }
-  });
+    rowNum += group.length;
+  }
 
   return { valid, errors };
 }
 
-// ─── helpers ────────────────────────────────────────────────────────────────
+// ─── helpers ──────────────────────────────────────────────────────────────────
 
-function coerce(row) {
-  return {
-    ...row,
-    financial_status:    row.financial_status?.toUpperCase() || undefined,
-    cancel_reason:       row.cancel_reason?.toUpperCase()    || undefined,
-    tags:                row.tags ? row.tags.split(",").map((t) => t.trim()).filter(Boolean) : [],
-    line_item_quantity:  row.line_item_quantity ? parseInt(row.line_item_quantity, 10) : undefined,
-    line_item_price:     row.line_item_price    ? parseFloat(row.line_item_price)      : undefined,
-    line_item_taxable:   row.line_item_taxable === "true" || row.line_item_taxable === "TRUE",
-  };
+function str(v) {
+  return String(v ?? "").trim();
+}
+
+function numeric(value, field, row, errors) {
+  const s = str(value);
+  if (s !== "" && Number.isNaN(Number(s))) {
+    errors.push({ row, field, message: `${field} must be a number, got "${value}"` });
+  }
+}
+
+function integer(value, field, row, errors) {
+  const s = str(value);
+  if (s !== "" && !Number.isInteger(Number(s))) {
+    errors.push({ row, field, message: `${field} must be a whole number, got "${value}"` });
+  }
 }

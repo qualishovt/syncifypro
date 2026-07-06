@@ -1,135 +1,144 @@
 /**
  * import/writers/upsertOrders.js
  *
- * Updates existing Shopify orders from validated import rows.
+ * Writes validated order rows to Shopify, on the import foundation:
+ *   groupRecords()   → one record per order (its Line Item / Transaction /
+ *                      Refund / Fulfillment rows)
+ *   buildOrderInput  → schema-valid orderCreate / orderUpdate inputs
+ *   Command          → MERGE/UPDATE/NEW/REPLACE/DELETE/IGNORE dispatch
  *
- * Important Shopify limitations:
- *   - Orders CANNOT be created via the Admin API in normal flows.
- *     Only draft orders can be created then completed.
- *   - Editable fields via orderUpdate are limited: note, tags,
- *     email, shipping address, and custom attributes.
- *   - Line items cannot be changed after order creation via API.
+ * Order-write reality (documented limits):
+ *   - orderCreate creates the order with line items, customer, addresses,
+ *     shipping line, and transactions. Needs write_orders + an offline token.
+ *   - orderUpdate can only change email/note/tags/shipping address — never
+ *     line items or totals — so MERGE/UPDATE on an existing order is a light
+ *     touch, not a full re-sync.
+ *   - Refunds and fulfillments are not created here (export-only for now).
  *
- * This writer handles: note, tags, email, shipping address updates.
- * Rows are grouped by order_id so we send one mutation per order.
+ * Rate limit: dev/trial stores allow only ~5 orderCreate calls/minute, so
+ * creates are throttled conservatively.
  */
 
-const UPDATE_ORDER = `#graphql
-  mutation UpdateOrder($input: OrderInput!) {
-    orderUpdate(input: $input) {
+import { groupRecords } from "../assemble.js";
+import { buildOrderInput } from "./orderInput.js";
+import { COMMAND } from "../command.js";
+
+const ORDER_CREATE = `#graphql
+  mutation CreateOrder($order: OrderCreateOrderInput!, $options: OrderCreateOptionsInput) {
+    orderCreate(order: $order, options: $options) {
       order { id name }
       userErrors { field message }
     }
   }
 `;
 
-/**
- * Update existing orders from validated rows.
- *
- * @param {object[]} rows  - coerced, validated rows from validateOrderRows()
- * @param {import("@shopify/shopify-app-remix/server").AdminApiContext} admin
- * @returns {Promise<{ created: number, updated: number, errors: object[] }>}
- */
-export async function upsertOrders(rows, admin) {
-  const orders = groupRowsIntoOrders(rows);
-
-  let updated = 0;
-  const errors = [];
-
-  const batches = chunk(orders, 10);
-
-  for (const batch of batches) {
-    await Promise.all(
-      batch.map(async (order) => {
-        try {
-          const input = buildOrderInput(order);
-
-          const response = await admin.graphql(UPDATE_ORDER, { variables: { input } });
-          const { data } = await response.json();
-
-          const userErrors = data?.orderUpdate?.userErrors ?? [];
-
-          if (userErrors.length) {
-            errors.push({ order: order.name, userErrors });
-          } else {
-            updated++;
-          }
-        } catch (err) {
-          errors.push({ order: order.name, message: err.message });
-        }
-      })
-    );
-
-    if (batches.indexOf(batch) < batches.length - 1) {
-      await sleep(50);
+const ORDER_UPDATE = `#graphql
+  mutation UpdateOrder($input: OrderInput!) {
+    orderUpdate(input: $input) {
+      order { id }
+      userErrors { field message }
     }
   }
+`;
 
-  // Orders can't be created via API — created always 0
-  return { created: 0, updated, errors };
-}
-
-// ─── helpers ────────────────────────────────────────────────────────────────
-
-/**
- * Group flat line item rows back into order objects.
- * Multiple rows with the same order_id are merged (last write wins
- * for order-level fields, line items are collected).
- */
-function groupRowsIntoOrders(rows) {
-  const map = new Map();
-
-  for (const row of rows) {
-    const key = row.order_id;
-
-    if (!map.has(key)) {
-      map.set(key, {
-        id:    `gid://shopify/Order/${row.order_id}`,
-        name:  row.order_name,
-        email: row.email   || undefined,
-        note:  row.note    || undefined,
-        tags:  row.tags    || [],
-        shippingAddress: hasShippingAddress(row) ? {
-          firstName: row.shipping_first_name || undefined,
-          lastName:  row.shipping_last_name  || undefined,
-          company:   row.shipping_company    || undefined,
-          address1:  row.shipping_address1   || undefined,
-          address2:  row.shipping_address2   || undefined,
-          city:      row.shipping_city       || undefined,
-          province:  row.shipping_province   || undefined,
-          zip:       row.shipping_zip        || undefined,
-          country:   row.shipping_country    || undefined,
-          phone:     row.shipping_phone      || undefined,
-        } : undefined,
-      });
+const ORDER_DELETE = `#graphql
+  mutation DeleteOrder($orderId: ID!) {
+    orderDelete(orderId: $orderId) {
+      deletedId
+      userErrors { field message }
     }
   }
+`;
 
-  return Array.from(map.values());
+// Don't email the customer for imported/back-filled orders, and don't let an
+// import move real inventory.
+const CREATE_OPTIONS = { sendReceipt: false, sendFulfillmentReceipt: false, inventoryBehaviour: "BYPASS" };
+
+/**
+ * @param {object[]} rows - header-normalized, validated order rows
+ * @param {import("@shopify/shopify-app-react-router/server").AdminApiContext} admin
+ * @returns {Promise<{ created: number, updated: number, deleted: number, skipped: number, errors: object[] }>}
+ */
+export async function upsertOrders(rows, admin, { onProgress } = {}) {
+  const groups = groupRecords(rows);
+  const result = { created: 0, updated: 0, deleted: 0, skipped: 0, errors: [], results: new Array(groups.length) };
+
+  // Small batches with a pause — respects the dev-store ~5 creates/minute cap
+  // better than a wide fan-out while still overlapping network latency.
+  let base = 0;
+  for (const batch of chunk(groups, 5)) {
+    const start = base;
+    await Promise.all(batch.map((group, k) =>
+      writeGroup(group, admin, result).then((o) => { result.results[start + k] = o; })
+    ));
+    base += batch.length;
+    onProgress?.(batch.length);
+    await sleep(250);
+  }
+  return result;
 }
 
-function buildOrderInput(order) {
-  const input = { id: order.id };
+async function writeGroup(group, admin, result) {
+  let built;
+  try {
+    built = buildOrderInput(group);
+  } catch (err) {
+    result.errors.push({ order: group[0]?.order_name ?? "", message: err.message });
+    return { status: "failed", comment: err.message };
+  }
+  const { command, orderId, create, update } = built;
+  const label = create.name || orderId || create.email || "(unknown)";
 
-  if (order.email)           input.email           = order.email;
-  if (order.note)            input.note            = order.note;
-  if (order.tags?.length)    input.tags            = order.tags;
-  if (order.shippingAddress) input.shippingAddress = order.shippingAddress;
+  try {
+    if (command === COMMAND.IGNORE) { result.skipped++; return { status: "skipped", comment: "Ignored (Command)" }; }
 
-  return input;
+    if (command === COMMAND.DELETE) {
+      if (!orderId) { result.skipped++; return { status: "skipped", comment: "No matching order to delete" }; }
+      const errs = await run(admin, ORDER_DELETE, { orderId }, "orderDelete");
+      if (errs.length) { result.errors.push({ order: label, userErrors: errs }); return { status: "failed", comment: msgs(errs) }; }
+      result.deleted++;
+      return { status: "deleted", comment: "" };
+    }
+
+    // Existing order + non-NEW command → limited orderUpdate.
+    if (orderId && command !== COMMAND.NEW) {
+      const errs = await run(admin, ORDER_UPDATE, { input: update }, "orderUpdate");
+      if (errs.length) { result.errors.push({ order: label, userErrors: errs }); return { status: "failed", comment: msgs(errs) }; }
+      result.updated++;
+      return { status: "updated", comment: "" };
+    }
+
+    // UPDATE/REPLACE with no existing order can't create — skip.
+    if (command === COMMAND.UPDATE || command === COMMAND.REPLACE) {
+      result.skipped++;
+      return { status: "skipped", comment: "No matching order to update" };
+    }
+
+    const errs = await run(admin, ORDER_CREATE, { order: create, options: CREATE_OPTIONS }, "orderCreate");
+    if (errs.length) { result.errors.push({ order: label, userErrors: errs }); return { status: "failed", comment: msgs(errs) }; }
+    result.created++;
+    return { status: "created", comment: "" };
+  } catch (err) {
+    result.errors.push({ order: label, message: err.message });
+    return { status: "failed", comment: err.message };
+  }
 }
 
-function hasShippingAddress(row) {
-  return [
-    row.shipping_address1, row.shipping_city,
-    row.shipping_country,  row.shipping_zip,
-  ].some(Boolean);
+/** Join userError messages into one comment string. */
+function msgs(errs) {
+  return errs.map((e) => e.message).filter(Boolean).join("; ");
+}
+
+async function run(admin, mutation, variables, key) {
+  const res = await admin.graphql(mutation, { variables });
+  const { data } = await res.json();
+  return data?.[key]?.userErrors ?? [];
 }
 
 function chunk(arr, size) {
-  const result = [];
-  for (let i = 0; i < arr.length; i += size) result.push(arr.slice(i, i + size));
-  return result;
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
 }
 
 function sleep(ms) {

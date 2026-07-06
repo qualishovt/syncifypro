@@ -1,4 +1,4 @@
-# Exportify/Importify — Shopify Export/Import App
+# SyncifyPro — Shopify Export/Import App
 
 ## Stack
 - React Router 7 (Shopify template), JS not TS

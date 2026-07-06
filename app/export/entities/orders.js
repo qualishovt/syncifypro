@@ -111,10 +111,11 @@ const ORDERS_QUERY = `#graphql
  * @param {import("@shopify/shopify-app-remix/server").AdminApiContext} admin
  * @returns {Promise<object[]>}
  */
-export async function extractOrders(admin, { query = "status:any" } = {}) {
+export async function extractOrders(admin, { query = "status:any", onProgress } = {}) {
   const rows = [];
   let cursor = null;
   let hasNextPage = true;
+  let processed = 0;
 
   while (hasNextPage) {
     const response = await admin.graphql(ORDERS_QUERY, {
@@ -142,6 +143,9 @@ export async function extractOrders(admin, { query = "status:any" } = {}) {
     for (const order of nodes) {
       for (const row of buildOrderRows(order)) rows.push(row);
     }
+
+    processed += nodes.length;
+    onProgress?.(processed);
 
     hasNextPage = pageInfo.hasNextPage;
     cursor = pageInfo.endCursor;

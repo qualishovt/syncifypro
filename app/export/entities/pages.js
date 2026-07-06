@@ -19,10 +19,11 @@ const PAGES_QUERY = `#graphql
   }
 `;
 
-export async function extractPages(admin, { query = "" } = {}) {
+export async function extractPages(admin, { query = "", onProgress } = {}) {
   const rows = [];
   let cursor = null;
   let hasNextPage = true;
+  let processed = 0;
 
   while (hasNextPage) {
     const response = await admin.graphql(PAGES_QUERY, {
@@ -37,6 +38,8 @@ export async function extractPages(admin, { query = "" } = {}) {
     const { nodes, pageInfo } = data.pages;
     for (const page of nodes) rows.push(normalizePage(page));
 
+    processed += nodes.length;
+    onProgress?.(processed);
     hasNextPage = pageInfo.hasNextPage;
     cursor = pageInfo.endCursor;
   }

@@ -26,10 +26,11 @@ const COLLECTIONS_QUERY = `#graphql
   }
 `;
 
-export async function extractCollections(admin, { query = "" } = {}) {
+export async function extractCollections(admin, { query = "", onProgress } = {}) {
   const rows = [];
   let cursor = null;
   let hasNextPage = true;
+  let processed = 0;
 
   while (hasNextPage) {
     const response = await admin.graphql(COLLECTIONS_QUERY, {
@@ -44,6 +45,8 @@ export async function extractCollections(admin, { query = "" } = {}) {
     const { nodes, pageInfo } = data.collections;
     for (const collection of nodes) rows.push(normalizeCollection(collection));
 
+    processed += nodes.length;
+    onProgress?.(processed);
     hasNextPage = pageInfo.hasNextPage;
     cursor = pageInfo.endCursor;
   }

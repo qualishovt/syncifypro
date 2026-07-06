@@ -54,7 +54,7 @@ const VARIANT_METAFIELDS_FRAGMENT = `
 
 // $query filters which products Shopify returns (empty = all products).
 // The flags toggle the (slow) dynamic sub-selections so plain exports stay fast.
-function buildProductsQuery({ includeInventory, includeMetafields, includeVariantMetafields, catalogs } = {}) {
+function buildProductsQuery({ includeInventory, includeMetafields, includeVariantMetafields, includeShipping, catalogs } = {}) {
   const publicationFields = catalogs?.length ? publishedOnPublicationFields(catalogs) : "";
   return `#graphql
   query GetProducts($first: Int!, $after: String, $query: String) {
@@ -123,9 +123,7 @@ function buildProductsQuery({ includeInventory, includeMetafields, includeVarian
               name
               value
             }
-            deliveryProfile {
-              name
-            }${includeVariantMetafields ? VARIANT_METAFIELDS_FRAGMENT : ""}
+            ${includeShipping ? "deliveryProfile { name }" : ""}${includeVariantMetafields ? VARIANT_METAFIELDS_FRAGMENT : ""}
             media(first: 1) {
               nodes {
                 ... on MediaImage {
@@ -169,10 +167,11 @@ function buildProductsQuery({ includeInventory, includeMetafields, includeVarian
  * @param {string[]} [options.fields] - selected columns; toggles the inventory fetch
  * @returns {Promise<object[]>}
  */
-export async function extractProducts(admin, { query = "", fields } = {}) {
+export async function extractProducts(admin, { query = "", fields, onProgress } = {}) {
   const rows = [];
   let cursor = null;
   let hasNextPage = true;
+  let processed = 0; // parent products fetched — drives the progress bar
 
   // Each dynamic group is fetched only when one of its columns is selected,
   // so plain product exports stay fast. Column keys are the human headers.
@@ -181,13 +180,16 @@ export async function extractProducts(admin, { query = "", fields } = {}) {
   const includeMetafields = sel.some((f) => f.startsWith("Metafield: "));
   const includeVariantMetafields = sel.some((f) => f.startsWith("Variant Metafield: "));
   const includeCatalogs = sel.some(isCatalogColumn);
+  // deliveryProfile needs read_shipping — only request it when the Variant
+  // Shipping Profile column is selected, so plain exports don't hit the scope.
+  const includeShipping = sel.includes("variant_shipping_profile");
 
   // Fetch catalog data first — the query aliases publishedOnPublication per
   // catalog ("Included"), and prices are joined per variant afterwards.
   const catalogData = includeCatalogs ? await fetchCatalogData(admin) : undefined;
 
   const productsQuery = buildProductsQuery({
-    includeInventory, includeMetafields, includeVariantMetafields,
+    includeInventory, includeMetafields, includeVariantMetafields, includeShipping,
     catalogs: catalogData?.catalogs,
   });
 
@@ -204,8 +206,14 @@ export async function extractProducts(admin, { query = "", fields } = {}) {
 
     const { data, errors } = await response.json();
 
+    // Shopify can return HTTP 200 with both data AND errors when a field is
+    // access-denied (e.g. deliveryProfile without read_shipping). If products
+    // still came back, log and continue with that field blank rather than
+    // failing the whole export; only throw when there's no usable data.
     if (errors?.length) {
-      throw new Error(`Shopify API error: ${errors.map((e) => e.message).join(", ")}`);
+      const messages = errors.map((e) => e.message).join(", ");
+      if (!data?.products) throw new Error(`Shopify API error: ${messages}`);
+      console.warn(`[products export] Some fields unavailable: ${messages}`);
     }
 
     const { nodes, pageInfo } = data.products;
@@ -220,6 +228,9 @@ export async function extractProducts(admin, { query = "", fields } = {}) {
         rows.push(row);
       }
     }
+
+    processed += nodes.length;
+    onProgress?.(processed);
 
     hasNextPage = pageInfo.hasNextPage;
     cursor = pageInfo.endCursor;

@@ -1,0 +1,83 @@
+/**
+ * Tests for import/detect.js and import/intent.js — the auto-detect + preview
+ * intent layer that makes the import "just drop the file" like Matrixify.
+ */
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+
+import { detectEntity } from "./detect.js";
+import { summarizeIntent } from "./intent.js";
+
+test("detectEntity: products file from distinctive columns", () => {
+  const headers = ["ID", "Command", "Handle", "Title", "Variant SKU", "Body HTML", "Vendor"];
+  const d = detectEntity(headers);
+  assert.equal(d.entity, "products");
+  assert.equal(d.supported, true);
+  assert.equal(d.confidence, "high");
+});
+
+test("detectEntity: redirects file isn't mistaken for products", () => {
+  // "ID"/"Command" are shared, but "Path"/"Redirect to" are redirect-only.
+  const headers = ["ID", "Command", "Path", "Redirect to"];
+  const d = detectEntity(headers);
+  assert.equal(d.entity, "redirects");
+});
+
+test("detectEntity: customers file", () => {
+  const headers = ["ID", "Command", "Email", "First Name", "Last Name", "Tags"];
+  const d = detectEntity(headers);
+  assert.equal(d.entity, "customers");
+});
+
+test("detectEntity: only generic columns → low confidence", () => {
+  const d = detectEntity(["ID", "Command"]);
+  assert.equal(d.confidence, "low");
+});
+
+test("detectEntity: empty header list → none", () => {
+  const d = detectEntity([]);
+  assert.equal(d.entity, null);
+  assert.equal(d.confidence, "none");
+});
+
+test("summarizeIntent: MERGE with id = update, without id = create", () => {
+  const rows = [
+    { product_id: "gid://x/1", command: "", title: "Has id" },      // update
+    { product_id: "", handle: "", command: "MERGE", title: "New" }, // create
+  ];
+  const s = summarizeIntent(rows, "products");
+  assert.equal(s.records, 2);
+  assert.equal(s.update, 1);
+  assert.equal(s.create, 1);
+});
+
+test("summarizeIntent: NEW/DELETE/IGNORE commands", () => {
+  const rows = [
+    { product_id: "gid://x/1", command: "NEW" },     // create (forced)
+    { product_id: "gid://x/2", command: "DELETE" },  // delete
+    { product_id: "gid://x/3", command: "IGNORE" },  // skip
+  ];
+  const s = summarizeIntent(rows, "products");
+  assert.equal(s.create, 1);
+  assert.equal(s.delete, 1);
+  assert.equal(s.skip, 1);
+});
+
+test("summarizeIntent: unknown command is recorded and skipped", () => {
+  const rows = [{ product_id: "gid://x/1", command: "FROB" }];
+  const s = summarizeIntent(rows, "products");
+  assert.equal(s.skip, 1);
+  assert.deepEqual(s.unknownCommands, ["FROB"]);
+});
+
+test("summarizeIntent: exploded rows count as one record", () => {
+  const rows = [
+    { product_id: "gid://x/1", command: "MERGE", top_row: "true", title: "P" },
+    { product_id: "", command: "", top_row: "", variant_sku: "V1" },
+    { product_id: "", command: "", top_row: "", variant_sku: "V2" },
+  ];
+  const s = summarizeIntent(rows, "products");
+  assert.equal(s.records, 1);
+  assert.equal(s.update, 1);
+});

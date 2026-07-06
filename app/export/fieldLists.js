@@ -140,6 +140,8 @@ export const CUSTOMER_FIELDS = [
   "note", "verified_email", "tax_exempt", "tags", "tags_command", "total_spent",
   "orders_count", "send_account_activation_email", "send_welcome_email",
   "password", "multipass_identifier",
+  "tax_exemptions", "data_sale_opt_out", "lifetime_duration",
+  "product_subscriber_status",
   // First & last order
   "first_order_id", "first_order_name", "first_order_processed_at", "first_order_total",
   "last_order_id", "last_order_name", "last_order_processed_at", "last_order_total",
@@ -297,8 +299,9 @@ export const METAFIELD_DEF_FIELDS = [
 ];
 
 export const TRANSLATION_FIELDS = [
-  "translatable_type", "translatable_id", "field", "locale", "source",
-  "translated", "outdated",
+  "translatable_type", "translatable_id", "translatable_handle", "field",
+  "original_value", "translation_locale", "translated", "outdated",
+  "translation_updated_at",
 ];
 
 export const LOCATION_FIELDS = [
@@ -503,9 +506,10 @@ export const COLUMN_GROUPS_BY_ENTITY = {
       "locale", "state", "email_marketing_state", "email_marketing_opt_in",
       "email_marketing_updated_at", "sms_marketing_state", "sms_marketing_opt_in",
       "sms_marketing_updated_at", "sms_marketing_source", "created_at", "updated_at",
-      "note", "verified_email", "tax_exempt", "tags", "tags_command", "total_spent",
-      "orders_count", "send_account_activation_email", "send_welcome_email",
-      "password", "multipass_identifier",
+      "note", "verified_email", "tax_exempt", "tax_exemptions", "data_sale_opt_out",
+      "lifetime_duration", "product_subscriber_status", "tags", "tags_command",
+      "total_spent", "orders_count", "send_account_activation_email",
+      "send_welcome_email", "password", "multipass_identifier",
     ] },
     { label: "Orders", fields: [
       "first_order_id", "first_order_name", "first_order_processed_at", "first_order_total",
@@ -643,9 +647,10 @@ export const COLUMN_GROUPS_BY_ENTITY = {
     ] },
   ],
   translations: [
-    { label: "Translation", fields: [
-      "translatable_type", "translatable_id", "field", "locale", "source",
-      "translated", "outdated",
+    { label: "Translatable", fields: [
+      "translatable_type", "translatable_id", "translatable_handle", "field",
+      "original_value", "translation_locale", "translated", "outdated",
+      "translation_updated_at",
     ] },
   ],
   locations: [
@@ -816,6 +821,7 @@ export const FIELD_LABELS = {
   order_status_url: "Order Status URL",
   line_items_quantity: "Line Items Quantity",
   total_weight: "Total Weight (g)",
+  cancel_reason: "Cancel Reason",
   cancelled_at: "Cancelled At",
   closed_at: "Closed At",
   processed_at: "Processed At",
@@ -917,6 +923,10 @@ export const FIELD_LABELS = {
   verified_email: "Verified Email",
   state: "State",
   tax_exempt: "Tax Exempt",
+  tax_exemptions: "Tax Exemptions",
+  data_sale_opt_out: "Data Sale Opt Out",
+  lifetime_duration: "Lifetime Duration",
+  product_subscriber_status: "Product Subscriber Status",
   orders_count: "Orders Count",
   total_spent: "Total Spent",
   total_spent_currency: "Total Spent Currency",
@@ -1078,14 +1088,16 @@ export const FIELD_LABELS = {
   validations: "Validations",
   metafields_count: "Metafields Count",
 
-  // Translations
-  translatable_type: "Resource Type",
-  translatable_id: "Resource ID",
+  // Translatables (translatable-content template — Matrixify-style headers)
+  translatable_type: "Entity",
+  translatable_id: "Entity ID",
+  translatable_handle: "Entity Handle",
   field: "Field",
-  locale: "Locale",
-  source: "Source",
-  translated: "Translated",
-  outdated: "Outdated",
+  original_value: "Original Value",
+  translation_locale: "Locale",
+  translated: "Translation Value",
+  outdated: "Translation Is Outdated",
+  translation_updated_at: "Translation Updated At",
 
   // Locations (name/address_* inherited above)
   location_id: "ID",
@@ -1159,7 +1171,7 @@ export const FIELD_LABELS = {
   browser_ip: "Browser IP",
   landing_page: "Landing Page",
   referrer_url: "Referrer URL",
-  source: "Source",
+  source: "Referring Source",
   source_type: "Source Type",
   utm_source: "UTM Source",
   utm_medium: "UTM Medium",
@@ -1218,7 +1230,7 @@ export const FIELD_LABELS = {
   risk_level: "Risk Level",
   risk_facts: "Risk Facts",
   fulfillment_id: "Fulfillment ID",
-  fulfillment_display_status: "Fulfillment Status",
+  fulfillment_display_status: "Fulfillment Display Status",
   fulfillment_created_at: "Fulfillment Created At",
   fulfillment_updated_at: "Fulfillment Updated At",
   fulfillment_total_quantity: "Fulfillment Total Quantity",
@@ -1481,7 +1493,7 @@ export const DEFAULT_FIELDS_BY_ENTITY = {
   activity:    ["activity_id", "entity", "format", "status", "row_count", "created_at"],
   metaobjects: ["metaobject_id", "handle", "type", "display_name", "updated_at"],
   metafields:  ["namespace", "key", "name", "owner_type", "type"],
-  translations: ["translatable_type", "translatable_id", "field", "locale", "translated"],
+  translations: ["translatable_type", "translatable_id", "translatable_handle", "field", "original_value", "translation_locale", "translated"],
   locations:   ["location_id", "name", "active", "address_city", "address_country"],
   catalogs:    ["catalog_id", "title", "type", "status"],
   metaobject_definitions: ["definition_id", "type", "name", "metaobjects_count"],

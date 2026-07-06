@@ -16,10 +16,11 @@ const REDIRECTS_QUERY = `#graphql
   }
 `;
 
-export async function extractRedirects(admin, { query = "" } = {}) {
+export async function extractRedirects(admin, { query = "", onProgress } = {}) {
   const rows = [];
   let cursor = null;
   let hasNextPage = true;
+  let processed = 0;
 
   while (hasNextPage) {
     const response = await admin.graphql(REDIRECTS_QUERY, {
@@ -34,6 +35,8 @@ export async function extractRedirects(admin, { query = "" } = {}) {
     const { nodes, pageInfo } = data.urlRedirects;
     for (const redirect of nodes) rows.push(normalizeRedirect(redirect));
 
+    processed += nodes.length;
+    onProgress?.(processed);
     hasNextPage = pageInfo.hasNextPage;
     cursor = pageInfo.endCursor;
   }

@@ -1,86 +1,93 @@
 /**
  * import/validators/products.js
  *
- * Validates parsed CSV rows before they're sent to Shopify.
- * Returns { valid: [], errors: [] } so the caller can decide
- * whether to abort or import valid rows and report the bad ones.
+ * Record-aware validation for product imports. Rows arrive header-normalized
+ * (snake_case keys) and are grouped into products first, so a product is
+ * validated as a whole rather than as orphaned variant rows — dropping a lone
+ * variant row would silently mutilate the product.
  *
- * Swap the manual checks here for zod if you prefer schema-first:
- *   import { z } from "zod";
+ * Valid rows are returned UNCHANGED (still strings): the productSet input
+ * builder does its own coercion, so the validator's job is to reject bad
+ * records and report why, not to transform.
  */
 
-const REQUIRED_FIELDS = ["title"];
-const VALID_STATUSES  = ["ACTIVE", "DRAFT", "ARCHIVED"];
+import { groupRecords, topRow } from "../assemble.js";
+import { parseCommand, COMMAND } from "../command.js";
+
+const VALID_STATUSES = new Set(["ACTIVE", "DRAFT", "ARCHIVED"]);
 
 /**
- * @param {object[]} rows - parsed CSV rows (raw strings)
+ * @param {object[]} rows - header-normalized rows
  * @returns {{ valid: object[], errors: Array<{ row: number, field: string, message: string }> }}
  */
 export function validateProductRows(rows) {
-  const valid  = [];
+  const valid = [];
   const errors = [];
 
-  rows.forEach((row, idx) => {
-    const rowNum = idx + 2; // +2 because row 1 is the header
-    const rowErrors = [];
+  let rowNum = 2; // row 1 is the header
+  for (const group of groupRecords(rows)) {
+    const top = topRow(group);
+    const groupErrors = [];
 
-    // ── Required fields ──────────────────────────────────────────
-    for (const field of REQUIRED_FIELDS) {
-      if (!row[field]?.trim()) {
-        rowErrors.push({ row: rowNum, field, message: `"${field}" is required` });
-      }
+    // ── Command ──────────────────────────────────────────────────
+    let command;
+    try {
+      command = parseCommand(top.command);
+    } catch (err) {
+      groupErrors.push({ row: rowNum, field: "command", message: err.message });
     }
 
-    // ── Status ───────────────────────────────────────────────────
-    if (row.status && !VALID_STATUSES.includes(row.status.toUpperCase())) {
-      rowErrors.push({
-        row: rowNum,
-        field: "status",
-        message: `Invalid status "${row.status}". Must be one of: ${VALID_STATUSES.join(", ")}`,
+    const hasIdentity = Boolean(str(top.product_id) || str(top.handle));
+
+    if (command === COMMAND.DELETE) {
+      // Delete only needs to identify the product.
+      if (!hasIdentity) {
+        groupErrors.push({ row: rowNum, field: "product_id", message: "DELETE needs a product ID or handle" });
+      }
+    } else if (command !== COMMAND.IGNORE) {
+      // Create/update: need a title (to create) or an identity (to update).
+      if (!str(top.title) && !hasIdentity) {
+        groupErrors.push({ row: rowNum, field: "title", message: "Product needs a title, or an ID/handle to update" });
+      }
+      if (str(top.status) && !VALID_STATUSES.has(str(top.status).toUpperCase())) {
+        groupErrors.push({ row: rowNum, field: "status", message: `Invalid status "${top.status}" (ACTIVE, DRAFT, ARCHIVED)` });
+      }
+      // Numeric checks across every variant row of the record.
+      group.forEach((row, i) => {
+        const rn = rowNum + i;
+        numeric(row.price, "price", rn, groupErrors);
+        numeric(row.compare_at_price, "compare_at_price", rn, groupErrors);
+        numeric(row.weight, "weight", rn, groupErrors);
+        integer(row.inventory_qty, "inventory_qty", rn, groupErrors);
       });
     }
 
-    // ── Price ────────────────────────────────────────────────────
-    if (row.price && isNaN(parseFloat(row.price))) {
-      rowErrors.push({ row: rowNum, field: "price", message: `Price must be a number, got "${row.price}"` });
-    }
+    if (groupErrors.length) errors.push(...groupErrors);
+    else valid.push(...group);
 
-    if (row.compare_at_price && isNaN(parseFloat(row.compare_at_price))) {
-      rowErrors.push({ row: rowNum, field: "compare_at_price", message: "Compare-at price must be a number" });
-    }
-
-    // ── Inventory ────────────────────────────────────────────────
-    if (row.inventory_qty !== "" && !Number.isInteger(Number(row.inventory_qty))) {
-      rowErrors.push({ row: rowNum, field: "inventory_qty", message: "Inventory quantity must be a whole number" });
-    }
-
-    // ── Weight ───────────────────────────────────────────────────
-    if (row.weight && isNaN(parseFloat(row.weight))) {
-      rowErrors.push({ row: rowNum, field: "weight", message: "Weight must be a number" });
-    }
-
-    if (rowErrors.length > 0) {
-      errors.push(...rowErrors);
-    } else {
-      valid.push(coerce(row));
-    }
-  });
+    rowNum += group.length;
+  }
 
   return { valid, errors };
 }
 
-// ─── helpers ────────────────────────────────────────────────────────────────
+// ─── helpers ──────────────────────────────────────────────────────────────────
 
-/** Coerce string values to the right types after validation passes */
-function coerce(row) {
-  return {
-    ...row,
-    status:          row.status?.toUpperCase() || "DRAFT",
-    price:           row.price           ? parseFloat(row.price)           : undefined,
-    compare_at_price: row.compare_at_price ? parseFloat(row.compare_at_price) : undefined,
-    inventory_qty:   row.inventory_qty   ? parseInt(row.inventory_qty, 10) : undefined,
-    weight:          row.weight          ? parseFloat(row.weight)          : undefined,
-    taxable:         row.taxable === "true" || row.taxable === "TRUE",
-    tags:            row.tags ? row.tags.split(",").map((t) => t.trim()).filter(Boolean) : [],
-  };
+function str(v) {
+  const s = String(v ?? "").trim();
+  return s === "" ? "" : s;
+}
+
+function numeric(value, field, row, errors) {
+  const s = str(value);
+  if (s !== "" && Number.isNaN(Number(s))) {
+    errors.push({ row, field, message: `${field} must be a number, got "${value}"` });
+  }
+}
+
+function integer(value, field, row, errors) {
+  const s = str(value);
+  if (s !== "" && !Number.isInteger(Number(s))) {
+    errors.push({ row, field, message: `${field} must be a whole number, got "${value}"` });
+  }
 }

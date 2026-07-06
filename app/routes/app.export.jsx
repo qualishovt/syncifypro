@@ -1,6 +1,9 @@
 /**
  * app/routes/app.export.jsx
  *
+ * The full Export configurator, reached from the "New Export" card on the home
+ * page (/app). Its job-status polling targets its own route (`/app/export?jobId=…`).
+ *
  * Polaris-styled export page with:
  *   - entity + format pickers
  *   - per-entity row filters
@@ -19,8 +22,9 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { useFetcher, useLoaderData } from "react-router";
 import { data } from "react-router";
 import { authenticate } from "../shopify.server.js";
-import { runExportJob, runMultiEntityExport } from "../export/exportJob.js";
-import { getJob, getJobsForShop } from "../db/bulkExportJob.server.js";
+import { startExport } from "../export/exportJob.js";
+import { extractTranslations } from "../export/entities/translations.js";
+import { getJob, countJobsForShop } from "../db/bulkExportJob.server.js";
 import { FIELDS_BY_ENTITY, PRODUCT_FIELDS, COLUMN_GROUPS_BY_ENTITY, FIELD_LABELS, placeholderFor } from "../export/fieldLists.js";
 import { buildInventoryFieldKeys } from "../export/inventoryColumns.js";
 import { buildMetafieldFieldKeys, PRODUCT_MF_PREFIX, VARIANT_MF_PREFIX } from "../export/metafieldColumns.js";
@@ -183,8 +187,9 @@ function contentFilters() {
 //   - When ?jobId=… is present → return that single bulk job's status (polling).
 //   - Always → return the recent-exports list for the shop.
 
-// One request fetches every entity's record count. `articles` has no
-// top-level count query in the Admin API, so it's intentionally omitted.
+// One request fetches every entity's record count. Several resources have no
+// top-level *Count query in the Admin API — those are counted via other routes
+// (see getDerivedCounts) or left as "—" when no count is obtainable.
 const ENTITY_COUNTS_QUERY = `#graphql
   query EntityCounts {
     productsCount { count }
@@ -238,6 +243,67 @@ async function getEntityCounts(admin) {
   }
 }
 
+// Counts for entities Shopify has no direct *Count query for, but which can be
+// derived cheaply:
+//   metaobjects → sum of each definition's metaobjectsCount
+//   content     → pages + the sum of every blog's articlesCount (content is the
+//                 merged pages+articles sheet)
+// Fetched separately from getEntityCounts so a scope/field failure here can't
+// blank the primary counts — each derived value is only set when its data
+// actually resolved (otherwise the entity stays "—").
+const DERIVED_COUNTS_QUERY = `#graphql
+  query DerivedCounts {
+    metaobjectDefinitions(first: 250) { nodes { metaobjectsCount } }
+    blogArticleCounts: blogs(first: 250) { nodes { articlesCount { count } } }
+    menus(first: 250) { nodes { id } pageInfo { hasNextPage } }
+  }
+`;
+
+async function getDerivedCounts(admin, pagesCount) {
+  try {
+    const response = await admin.graphql(DERIVED_COUNTS_QUERY);
+    const { data } = await response.json();
+    const out = {};
+
+    const defNodes = data?.metaobjectDefinitions?.nodes;
+    if (defNodes) out.metaobjects = defNodes.reduce((sum, n) => sum + (n.metaobjectsCount ?? 0), 0);
+
+    const blogNodes = data?.blogArticleCounts?.nodes;
+    if (blogNodes) {
+      const articles = blogNodes.reduce((sum, n) => sum + (n.articlesCount?.count ?? 0), 0);
+      out.content = (pagesCount ?? 0) + articles;
+    }
+
+    // Menus have no *Count query; a store has only a handful, so one page is
+    // exact. Show "250+" in the unlikely event of more.
+    const menuNodes = data?.menus?.nodes;
+    if (menuNodes) {
+      out.menus = data.menus.pageInfo?.hasNextPage ? "250+" : menuNodes.length;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+// "Translatables" count. No Admin *Count query exists, so a faithful count
+// needs the full multi-type sweep — the slowest of all the counts. Counts
+// distinct translatable (entity, id, field) — one per translatable field,
+// collapsed across locales — matching Matrixify's translatable-content total
+// (which counts fields that CAN be translated, not only ones already
+// translated). Run concurrently with the other loader queries; returns null on
+// failure so the entity falls back to "—".
+async function getTranslationsCount(admin) {
+  try {
+    const rows = await extractTranslations(admin);
+    return new Set(
+      rows.map((r) => `${r.translatable_type}|${r.translatable_id}|${r.field}`),
+    ).size;
+  } catch {
+    return null;
+  }
+}
+
 // Drives the dynamic product groups: locations → Multi-Location Inventory,
 // metafield definitions → Metafields / Variant Metafields, catalogs → Pricing.
 const PRODUCT_DYNAMIC_QUERY = `#graphql
@@ -274,41 +340,49 @@ export async function loader({ request }) {
 
   const url = new URL(request.url);
   const jobId = url.searchParams.get("jobId");
+  const wantData = url.searchParams.get("data") === "1";
 
-  let polledJob = null;
+  // Job-status polling (during an export) — no counts needed.
   if (jobId) {
     const job = await getJob(jobId);
     if (!job) return data({ error: "Job not found" }, { status: 404 });
-    polledJob = {
+    const polledJob = {
       jobId: job.id,
       status: job.status,
       signedUrl: job.signedUrl,
       filename: `${job.entity}-export.${job.format}`,
       expiresAt: job.signedUrlExpiry?.toISOString() ?? null,
       rowCount: job.rowCount,
+      progressCurrent: job.progressCurrent ?? null,
+      progressTotal: job.progressTotal ?? null,
       error: job.errorMessage,
     };
+    return { polledJob, counts: {}, productDynamic: EMPTY_PRODUCT_DYNAMIC, ready: false };
   }
 
-  const recent = await getJobsForShop(session.shop, 15);
-  const recentJobs = recent.map((j) => ({
-    id: j.id,
-    entity: j.entity,
-    format: j.format,
-    status: j.status,
-    rowCount: j.rowCount,
-    signedUrl: j.signedUrl,
-    expiresAt: j.signedUrlExpiry?.toISOString() ?? null,
-    createdAt: j.createdAt?.toISOString() ?? null,
-    error: j.errorMessage,
-  }));
+  // The heavy work — entity row counts + product dynamic columns (several Admin
+  // API calls). We DON'T run it on the initial page load, so the page opens
+  // instantly; the client immediately re-fetches with ?data=1 to fill it in.
+  if (wantData) {
+    // Run the independent (and slowest — translations) queries concurrently so
+    // the loader waits for the longest, not the sum.
+    const [entityCounts, translations, dynamic] = await Promise.all([
+      getEntityCounts(admin),
+      getTranslationsCount(admin),
+      getProductDynamic(admin),
+    ]);
+    const counts = entityCounts;
+    counts.shop = 1; // singleton
+    if (translations != null) counts.translations = translations;
+    Object.assign(counts, await getDerivedCounts(admin, counts.pages)); // metaobjects, content, menus
+    try {
+      counts.activity = await countJobsForShop(session.shop); // app-owned entity
+    } catch { /* leave as "—" */ }
+    return { polledJob: null, counts, productDynamic: dynamic, ready: true };
+  }
 
-  // Skip the counts + dynamic-column queries while polling a job (jobId
-  // present) so we don't re-run them every few seconds.
-  const counts = jobId ? {} : await getEntityCounts(admin);
-  const productDynamic = jobId ? EMPTY_PRODUCT_DYNAMIC : await getProductDynamic(admin);
-
-  return { polledJob, recentJobs, counts, productDynamic };
+  // Initial page load: return the shell instantly. Counts arrive via ?data=1.
+  return { polledJob: null, counts: {}, productDynamic: EMPTY_PRODUCT_DYNAMIC, ready: false };
 }
 
 // ─── Action ───────────────────────────────────────────────────────────────────
@@ -328,32 +402,9 @@ export async function action({ request }) {
   }
 
   try {
-    let result;
-    if (specs.length === 1) {
-      // Single-entity path preserves the bulk auto-switch for big stores.
-      const s = specs[0];
-      result = await runExportJob({
-        admin, shop: session.shop,
-        entity: s.entity,
-        format,
-        filters: s.filters ?? {},
-        fields: s.fields,
-      });
-    } else {
-      result = await runMultiEntityExport({
-        admin, shop: session.shop, specs, format,
-      });
-    }
-
-    if (result.mode === "direct") {
-      return {
-        mode: "direct",
-        signedUrl: result.signedUrl,
-        filename: result.filename,
-        expiresAt: result.expiresAt.toISOString(),
-      };
-    }
-    return { mode: "bulk", jobId: result.jobId };
+    // Every export runs as a tracked job now (in-process for direct-size,
+    // Shopify bulk for huge stores) so the UI can poll for progress.
+    return await startExport({ admin, shop: session.shop, specs, format });
   } catch (err) {
     return data({ error: err.message }, { status: 500 });
   }
@@ -412,15 +463,20 @@ const ENTITY_ICONS = {
   definitions: "data-table",
 };
 
-const STATUS_TONE = {
-  complete: "success",
-  running: "info",
-  pending: "info",
-  failed: "critical",
-};
-
 export default function ExportPage() {
-  const { recentJobs, counts, productDynamic } = useLoaderData();
+  const loaderData = useLoaderData();
+  const dataFetcher = useFetcher(); // lazily fetches the heavy counts + dynamic columns
+
+  // The page shell renders immediately; kick off the counts fetch on mount so
+  // they populate a moment later (instead of blocking the page from opening).
+  useEffect(() => {
+    if (!loaderData.ready) dataFetcher.load("/app/export?data=1");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const counts = dataFetcher.data?.counts ?? loaderData.counts;
+  const productDynamic = dataFetcher.data?.productDynamic ?? loaderData.productDynamic;
+  const countsLoading = !loaderData.ready && !dataFetcher.data;
 
   // Dynamic product groups (inventory, metafields, variant metafields,
   // catalog pricing), derived from store data. Empty groups are omitted.
@@ -495,6 +551,14 @@ export default function ExportPage() {
   const pollFetcher = useFetcher();
   const [pollingJobId, setPollingJobId] = useState(null);
 
+  // The current job's live status — but ONLY when it belongs to THIS export.
+  // pollFetcher.data can still hold the previous job's result (e.g. 100%), so
+  // gating on jobId stops the progress bar from flashing the old value and
+  // "jumping back" the moment a new export starts.
+  const poll = pollFetcher.data?.polledJob?.jobId === pollingJobId
+    ? pollFetcher.data.polledJob
+    : null;
+
   // Each popover matches the width of its full-width trigger (s-popover has
   // no "match trigger" option), so we measure the trigger and feed its pixel
   // width into the popover's inlineSize.
@@ -505,18 +569,27 @@ export default function ExportPage() {
   const result = fetcher.data;
 
   useEffect(() => {
-    if (result?.mode === "bulk" && result.jobId) setPollingJobId(result.jobId);
+    if ((result?.mode === "bulk" || result?.mode === "job") && result.jobId) setPollingJobId(result.jobId);
   }, [result]);
 
+  // One immediate poll when a NEW export starts, so the job + progress show up
+  // right away. Keyed only on pollingJobId (NOT pollFetcher) so it fires once
+  // per job — depending on pollFetcher would re-fire on every load and storm
+  // the server ("Failed to fetch").
+  useEffect(() => {
+    if (pollingJobId) pollFetcher.load(`/app/export?jobId=${pollingJobId}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pollingJobId]);
+
+  // Then poll every 3s until the job finishes.
   useEffect(() => {
     if (!pollingJobId) return;
-    const s = pollFetcher.data?.polledJob?.status;
-    if (s === "complete" || s === "failed") return;
+    if (poll?.status === "complete" || poll?.status === "failed") return;
     const interval = setInterval(() => {
       pollFetcher.load(`/app/export?jobId=${pollingJobId}`);
     }, 3000);
     return () => clearInterval(interval);
-  }, [pollingJobId, pollFetcher.data?.polledJob?.status, pollFetcher]);
+  }, [pollingJobId, poll?.status, pollFetcher]);
 
   // Apply a preset: built-ins reset or restore the last export; a saved
   // preset restores its stored format + entity configuration.
@@ -588,16 +661,15 @@ export default function ExportPage() {
   //   - bulk mode arrives later via the polling fetcher.
   const downloadResult = (() => {
     if (result?.mode === "direct") return result;
-    if (pollFetcher.data?.polledJob?.status === "complete") return pollFetcher.data.polledJob;
+    if (poll?.status === "complete") return poll;
     return null;
   })();
 
-  const bulkError = pollFetcher.data?.polledJob?.status === "failed"
-    ? pollFetcher.data.polledJob.error ?? "Export failed" : null;
+  const bulkError = poll?.status === "failed" ? poll.error ?? "Export failed" : null;
 
   const isPolling = pollingJobId &&
-    pollFetcher.data?.polledJob?.status !== "complete" &&
-    pollFetcher.data?.polledJob?.status !== "failed";
+    poll?.status !== "complete" &&
+    poll?.status !== "failed";
 
   // Allow export when at least one entity is ticked and each ticked entity
   // still has at least one column selected.
@@ -608,10 +680,26 @@ export default function ExportPage() {
 
   return (
     <s-page heading="Export">
+      {/* Breadcrumb back to the home page → renders "SyncifyPro > Export" in the title bar. */}
+      <s-link slot="breadcrumb-actions" href="/app">SyncifyPro</s-link>
+      {/* Title-bar actions (top-right): primary Export mirrors the form's Export
+          button; tertiary Back returns to the home page. */}
+      <s-button
+        slot="primary-action"
+        variant="primary"
+        icon="download"
+        onClick={handleExport}
+        disabled={!canSubmit ? true : undefined}
+        loading={isExporting || isPolling ? true : undefined}
+      >
+        Export
+      </s-button>
+      <s-button slot="secondary-actions" variant="tertiary" icon="arrow-left" href="/app">Back</s-button>
       {/* Hover highlight for column groups and their column rows. */}
       <style>{`
         .eg-row, .eg-col { transition: background-color .1s ease; }
         .eg-row:hover, .eg-col:hover { background: #f6f6f7; }
+        @keyframes eg-indeterminate { 0% { transform: translateX(-120%); } 100% { transform: translateX(320%); } }
       `}</style>
       <s-stack direction="block" gap="base">
 
@@ -639,7 +727,7 @@ export default function ExportPage() {
                         only; the visible text is rendered separately after the icon. */}
                     <span style={{ pointerEvents: "none", display: "inline-flex" }}>
                       <PolarisCheckbox
-                        label={capitalize(e)}
+                        label={entityDisplayName(e)}
                         labelAccessibilityVisibility="exclusive"
                         checked={enabled}
                         onChange={(v) => setEntityEnabled(e, v)}
@@ -647,9 +735,11 @@ export default function ExportPage() {
                       />
                     </span>
                     {ENTITY_ICONS[e] && <s-icon type={ENTITY_ICONS[e]} size="small" />}
-                    <span style={entityLabel}>{capitalize(e)}</span>
+                    <span style={entityLabel}>{entityDisplayName(e)}</span>
                     <span style={entityCount}>
-                      {counts?.[e] != null ? <s-badge>{counts[e].toLocaleString()}</s-badge> : "—"}
+                      {counts?.[e] != null
+                        ? <s-badge>{counts[e].toLocaleString()}</s-badge>
+                        : (countsLoading ? <s-text color="subdued">…</s-text> : "—")}
                     </span>
                   </div>
                 );
@@ -820,7 +910,7 @@ export default function ExportPage() {
                 icon="download"
                 onClick={handleExport}
                 disabled={!canSubmit ? true : undefined}
-                loading={isExporting ? true : undefined}
+                loading={isExporting || isPolling ? true : undefined}
               >
                 Export
               </s-button>
@@ -831,23 +921,44 @@ export default function ExportPage() {
               <s-banner tone="critical">{result?.error ?? bulkError}</s-banner>
             )}
 
-            {/* Bulk progress */}
-            {isPolling && (
-              <s-banner tone="info">
-                <s-stack direction="block" gap="small-200">
-                  <s-text>
-                    Large store — Shopify is processing your export in the background.
-                    This page updates automatically when it&apos;s ready.
-                  </s-text>
-                  <s-text color="subdued">
-                    Status: {pollFetcher.data?.polledJob?.status ?? "pending"}
-                    {pollFetcher.data?.polledJob?.rowCount
-                      ? ` · ${pollFetcher.data.polledJob.rowCount.toLocaleString()} rows`
-                      : ""}
-                  </s-text>
-                </s-stack>
-              </s-banner>
-            )}
+            {/* Export progress — opens the moment Export is clicked */}
+            {(isExporting || isPolling) && (() => {
+              const cur = poll?.progressCurrent ?? 0;
+              const tot = poll?.progressTotal ?? null;
+              const pct = tot ? Math.min(100, Math.round((cur / tot) * 100)) : null;
+              return (
+                <s-banner tone="info">
+                  <s-stack direction="block" gap="small-200">
+                    <s-text>Exporting…{pct != null ? ` ${pct}%` : ""}</s-text>
+                    <div
+                      role="progressbar"
+                      aria-valuemin={0}
+                      aria-valuemax={tot ?? undefined}
+                      aria-valuenow={pct != null ? cur : undefined}
+                      style={{ width: "100%", height: 8, background: "#e3e5e7", borderRadius: 4, overflow: "hidden" }}
+                    >
+                      <div
+                        style={{
+                          height: "100%",
+                          borderRadius: 4,
+                          background: "#2c6ecb",
+                          width: pct != null ? `${pct}%` : "30%",
+                          transition: "width .3s ease",
+                          ...(pct == null ? { animation: "eg-indeterminate 1.2s ease-in-out infinite" } : {}),
+                        }}
+                      />
+                    </div>
+                    <s-text color="subdued">
+                      {tot != null
+                        ? `${cur.toLocaleString()} / ${tot.toLocaleString()} records`
+                        : cur > 0
+                          ? `${cur.toLocaleString()} records processed…`
+                          : "Processing your export…"}
+                    </s-text>
+                  </s-stack>
+                </s-banner>
+              );
+            })()}
 
             {/* Download */}
             {downloadResult?.signedUrl && (
@@ -870,48 +981,6 @@ export default function ExportPage() {
           </s-stack>
         </s-section>
 
-        {/* ── Recent exports ───────────────────────────────────────── */}
-        <s-section heading="Recent exports">
-          {recentJobs.length === 0 ? (
-            <s-paragraph>No exports yet. Run one above to see it here.</s-paragraph>
-          ) : (
-            <s-table>
-              <s-table-header-row>
-                <s-table-header listSlot="primary">Entity</s-table-header>
-                <s-table-header>Format</s-table-header>
-                <s-table-header>Status</s-table-header>
-                <s-table-header>Rows</s-table-header>
-                <s-table-header>Created</s-table-header>
-                <s-table-header>File</s-table-header>
-              </s-table-header-row>
-              <s-table-body>
-                {recentJobs.map((j) => (
-                  <s-table-row key={j.id}>
-                    <s-table-cell>{capitalize(j.entity)}</s-table-cell>
-                    <s-table-cell>{FORMAT_LABELS[j.format] ?? j.format}</s-table-cell>
-                    <s-table-cell>
-                      <s-badge tone={STATUS_TONE[j.status] ?? "info"}>{j.status}</s-badge>
-                    </s-table-cell>
-                    <s-table-cell>{j.rowCount?.toLocaleString() ?? "—"}</s-table-cell>
-                    <s-table-cell>
-                      {j.createdAt ? new Date(j.createdAt).toLocaleString() : "—"}
-                    </s-table-cell>
-                    <s-table-cell>
-                      {j.status === "complete" && j.signedUrl && !isExpired(j.expiresAt) ? (
-                        <s-link href={j.signedUrl} target="_blank">Download</s-link>
-                      ) : j.status === "failed" ? (
-                        <s-text color="subdued">{truncate(j.error, 40)}</s-text>
-                      ) : (
-                        <s-text color="subdued">—</s-text>
-                      )}
-                    </s-table-cell>
-                  </s-table-row>
-                ))}
-              </s-table-body>
-            </s-table>
-          )}
-        </s-section>
-
       </s-stack>
     </s-page>
   );
@@ -922,6 +991,20 @@ export default function ExportPage() {
 function capitalize(s) {
   // Title-case each underscore-separated word: "smart_collections" → "Smart Collections".
   return s.split("_").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+}
+
+// Display names that don't follow the default title-casing of the entity key.
+const ENTITY_LABEL_OVERRIDES = {
+  definitions: "Metafield definitions",
+  inventory_transfers: "Inventory transfers",
+  // Exports the full translatable-content template (every translatable field,
+  // translated or not), so "Translatables" is more accurate than "Translations".
+  translations: "Translatables",
+};
+
+/** Human label for an entity key — override first, else title-cased key. */
+function entityDisplayName(e) {
+  return ENTITY_LABEL_OVERRIDES[e] ?? capitalize(e);
 }
 
 /**
@@ -989,16 +1072,6 @@ function PickerRow({ label, selected, onSelect, popoverId }) {
   );
 }
 /* eslint-enable react/prop-types */
-
-function isExpired(iso) {
-  if (!iso) return false;
-  return new Date(iso).getTime() < Date.now();
-}
-
-function truncate(str, n) {
-  if (!str) return "";
-  return str.length > n ? str.slice(0, n) + "…" : str;
-}
 
 function initialEntityState() {
   const state = {};
@@ -1254,7 +1327,7 @@ function EntityConfigCard({ entity, state, count, dynGroups = EMPTY_DYN_GROUPS, 
             expand chevron, and a remove (✕) button on the right. */}
         <div style={cardHeader} onClick={() => setOpen((o) => !o)}>
           {ENTITY_ICONS[entity] && <s-icon type={ENTITY_ICONS[entity]} />}
-          <span style={{ fontWeight: 700 }}>{capitalize(entity)}</span>
+          <span style={{ fontWeight: 700 }}>{entityDisplayName(entity)}</span>
           <div style={cardHeaderInfo}>
             <s-badge tone="success">{state.selectedFields.length} of {all.length} columns</s-badge>
             <s-badge>Total: {count != null ? count.toLocaleString() : "—"}</s-badge>
@@ -1273,7 +1346,7 @@ function EntityConfigCard({ entity, state, count, dynGroups = EMPTY_DYN_GROUPS, 
           <s-button
             variant="tertiary"
             icon="x"
-            accessibilityLabel={`Remove ${capitalize(entity)}`}
+            accessibilityLabel={`Remove ${entityDisplayName(entity)}`}
             onClick={(e) => { e.stopPropagation(); onRemove(); }}
             disabled={lock}
           />
@@ -1309,7 +1382,7 @@ function EntityConfigCard({ entity, state, count, dynGroups = EMPTY_DYN_GROUPS, 
 
             {state.selectedFields.length === 0 && (
               <s-banner tone="warning">
-                Select at least one column for {capitalize(entity)} or untick the entity above.
+                Select at least one column for {entityDisplayName(entity)} or untick the entity above.
               </s-banner>
             )}
 

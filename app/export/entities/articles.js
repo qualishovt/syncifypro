@@ -23,10 +23,11 @@ const ARTICLES_QUERY = `#graphql
   }
 `;
 
-export async function extractArticles(admin, { query = "" } = {}) {
+export async function extractArticles(admin, { query = "", onProgress } = {}) {
   const rows = [];
   let cursor = null;
   let hasNextPage = true;
+  let processed = 0;
 
   while (hasNextPage) {
     const response = await admin.graphql(ARTICLES_QUERY, {
@@ -41,6 +42,8 @@ export async function extractArticles(admin, { query = "" } = {}) {
     const { nodes, pageInfo } = data.articles;
     for (const article of nodes) rows.push(normalizeArticle(article));
 
+    processed += nodes.length;
+    onProgress?.(processed);
     hasNextPage = pageInfo.hasNextPage;
     cursor = pageInfo.endCursor;
   }
