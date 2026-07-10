@@ -1,12 +1,13 @@
 {
   "permissions": {
     "allow": [
-      "Bash",
-      "PowerShell",
       "Bash(*)",
       "Bash(npm *)",
       "Bash(npx *)",
       "Bash(npx eslint *)",
+      "Bash(npm run:*)",
+      "Bash(git:*)",
+      "Bash(ls:*)",
       "PowerShell(*)",
       "WebFetch(*)",
       "WebSearch",

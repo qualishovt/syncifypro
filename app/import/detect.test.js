@@ -7,7 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { detectEntity } from "./detect.js";
-import { summarizeIntent } from "./intent.js";
+import { summarizeIntent, classifyRecord } from "./intent.js";
 
 test("detectEntity: products file from distinctive columns", () => {
   const headers = ["ID", "Command", "Handle", "Title", "Variant SKU", "Body HTML", "Vendor"];
@@ -80,4 +80,28 @@ test("summarizeIntent: exploded rows count as one record", () => {
   const s = summarizeIntent(rows, "products");
   assert.equal(s.records, 1);
   assert.equal(s.update, 1);
+});
+
+// ─── classifyRecord (drives import modes) ──────────────────────────────────────
+
+test("classifyRecord: MERGE with identity → update, without → create", () => {
+  assert.equal(classifyRecord({ command: "", product_id: "gid://x/1" }, "products"), "update");
+  assert.equal(classifyRecord({ command: "", product_id: "", handle: "" }, "products"), "create");
+});
+
+test("classifyRecord: explicit commands", () => {
+  assert.equal(classifyRecord({ command: "NEW", product_id: "1" }, "products"), "create");
+  assert.equal(classifyRecord({ command: "DELETE", product_id: "1" }, "products"), "delete");
+  assert.equal(classifyRecord({ command: "IGNORE" }, "products"), "skip");
+  assert.equal(classifyRecord({ command: "UPDATE", product_id: "1" }, "products"), "update");
+  assert.equal(classifyRecord({ command: "REPLACE", handle: "h" }, "products"), "update");
+});
+
+test("classifyRecord: unknown command → skip", () => {
+  assert.equal(classifyRecord({ command: "FROB" }, "products"), "skip");
+});
+
+test("classifyRecord: identity keys are per-entity", () => {
+  assert.equal(classifyRecord({ command: "", email: "a@b.com" }, "customers"), "update");
+  assert.equal(classifyRecord({ command: "", path: "/x" }, "redirects"), "update");
 });

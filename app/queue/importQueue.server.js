@@ -25,11 +25,11 @@ async function startBoss() {
   await boss.createQueue(IMPORT_QUEUE);
 
   await boss.work(IMPORT_QUEUE, async ([job]) => {
-    const { jobId, shop, plan } = job.data;
+    const { jobId, shop, plan, options } = job.data;
     // Dynamic import avoids an importJob ↔ queue module cycle.
     const { runImportForJob } = await import("../import/importJob.js");
     const { admin } = await unauthenticated.admin(shop);
-    await runImportForJob({ admin, shop, jobId, plan });
+    await runImportForJob({ admin, shop, jobId, plan, options });
   });
 
   return boss;
@@ -43,7 +43,7 @@ export function getImportBoss() {
 
 /**
  * Enqueue an import for durable, off-request processing.
- * @param {{ jobId: string, shop: string, plan?: Array<{entity?: string, include?: boolean}> }} data
+ * @param {{ jobId: string, shop: string, plan?: Array<{entity?: string, include?: boolean}>, options?: object }} data
  */
 export async function enqueueImport(data) {
   const boss = await getImportBoss();

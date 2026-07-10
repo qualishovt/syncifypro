@@ -34,6 +34,37 @@ function hasIdentity(top, entity) {
 }
 
 /**
+ * The identifier column keys for an entity — the columns that must survive
+ * column selection so records can still be matched to existing store objects.
+ * @param {string} entity
+ * @returns {string[]}
+ */
+export function identityKeys(entity) {
+  return IDENTIFIER_KEYS[entity] ?? ["id"];
+}
+
+/**
+ * What a single record will do: "create" | "update" | "delete" | "skip".
+ * Same rules as the intent tally — used by import modes to keep/drop records.
+ *
+ * @param {object} top - the record's top row
+ * @param {string} entity
+ */
+export function classifyRecord(top, entity) {
+  let cmd;
+  try { cmd = parseCommand(top.command); } catch { return "skip"; }
+  switch (cmd) {
+    case COMMAND.IGNORE: return "skip";
+    case COMMAND.DELETE: return "delete";
+    case COMMAND.NEW: return "create";
+    case COMMAND.UPDATE:
+    case COMMAND.REPLACE: return "update";
+    case COMMAND.MERGE:
+    default: return hasIdentity(top, entity) ? "update" : "create";
+  }
+}
+
+/**
  * Tally what an import file intends to do, by record.
  *
  * @param {object[]} rows - header-normalized rows (snake_case keys)

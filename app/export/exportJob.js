@@ -59,6 +59,7 @@ import { buildProductQuery,
          buildFileQuery,
          buildCompanyQuery,
          buildDraftOrderQuery }        from "./filters.js";
+import { applyAdvancedFilters, activeAdvancedFilters } from "./advancedFilters.js";
 
 /** Threshold above which we switch to bulk operations */
 const BULK_THRESHOLD = 10_000;
@@ -260,7 +261,10 @@ export async function runMultiEntityExport({ admin, shop, specs, format }) {
     const buildQuery = QUERY_BUILDERS[spec.entity];
     const query      = buildQuery ? buildQuery(spec.filters ?? {}) : "";
     const extractor  = ENTITY_EXTRACTORS[spec.entity];
-    const rows       = await extractor(admin, { query, fields: spec.fields, shop });
+    const fetched    = await extractor(admin, { query, fields: spec.fields, shop });
+    // Advanced filters (column/operator/value) can't be expressed as a Shopify
+    // query, so they're applied to the fetched rows per record.
+    const rows       = applyAdvancedFilters(fetched, spec.advancedFilters);
     results.push({ entity: spec.entity, rows, fields: spec.fields });
   }
 
@@ -320,7 +324,12 @@ export async function startExport({ admin, shop, specs, format }) {
   // Huge single-entity streamable exports still use Shopify's bulk operations
   // (they can't be held in memory). Those poll the same job UI — just without a
   // determinate bar, since Shopify reports no incremental progress.
-  if (specs.length === 1 && STREAMABLE_FORMATS.includes(format) && BULK_ENTITIES.includes(specs[0].entity)) {
+  //
+  // Advanced filters (column/operator/value) are applied to the fetched rows,
+  // which the bulk/streaming path never materializes — so route those through
+  // the tracked (direct) path instead, the same way multi-entity always does.
+  const hasAdvanced = activeAdvancedFilters(specs[0].advancedFilters).length > 0;
+  if (specs.length === 1 && !hasAdvanced && STREAMABLE_FORMATS.includes(format) && BULK_ENTITIES.includes(specs[0].entity)) {
     const count = await safeCount(admin, specs[0].entity);
     if (count != null && count >= BULK_THRESHOLD) {
       const s = specs[0];
@@ -400,7 +409,7 @@ async function processTrackedExport({ admin, shop, job, specs, format }) {
     const query     = QUERY_BUILDERS[spec.entity] ? QUERY_BUILDERS[spec.entity](spec.filters ?? {}) : "";
     const extractor = ENTITY_EXTRACTORS[spec.entity];
     let entityDone  = 0;
-    const rows = await extractor(admin, {
+    const fetched = await extractor(admin, {
       query, fields: spec.fields, shop,
       onProgress: (n) => {
         entityDone = n;
@@ -408,6 +417,9 @@ async function processTrackedExport({ admin, shop, job, specs, format }) {
       },
     });
     base += entityDone;
+    // Advanced filters (column/operator/value) are applied to the fetched rows
+    // per record — they can't be pushed down into the Shopify query.
+    const rows = applyAdvancedFilters(fetched, spec.advancedFilters);
     results.push({ entity: spec.entity, rows, fields: spec.fields });
   }
 

@@ -357,8 +357,13 @@ export async function loader({ request }) {
       progressTotal: job.progressTotal ?? null,
       error: job.errorMessage,
     };
-    return { polledJob, counts: {}, productDynamic: EMPTY_PRODUCT_DYNAMIC, ready: false };
+    return { polledJob, counts: {}, productDynamic: EMPTY_PRODUCT_DYNAMIC, ready: false, presets: [], defaultFormat: "csv", blockedEntities: [] };
   }
+
+  const { listPresets } = await import("../db/exportPreset.server.js");
+  const { getAppSettings } = await import("../db/appSettings.server.js");
+  const presets = (await listPresets(session.shop)).map(serializePreset);
+  const { defaultExportFormat: defaultFormat, blockedEntities } = await getAppSettings(session.shop);
 
   // The heavy work — entity row counts + product dynamic columns (several Admin
   // API calls). We DON'T run it on the initial page load, so the page opens
@@ -378,11 +383,20 @@ export async function loader({ request }) {
     try {
       counts.activity = await countJobsForShop(session.shop); // app-owned entity
     } catch { /* leave as "—" */ }
-    return { polledJob: null, counts, productDynamic: dynamic, ready: true };
+    return { polledJob: null, counts, productDynamic: dynamic, ready: true, presets, defaultFormat, blockedEntities };
   }
 
   // Initial page load: return the shell instantly. Counts arrive via ?data=1.
-  return { polledJob: null, counts: {}, productDynamic: EMPTY_PRODUCT_DYNAMIC, ready: false };
+  return { polledJob: null, counts: {}, productDynamic: EMPTY_PRODUCT_DYNAMIC, ready: false, presets, defaultFormat, blockedEntities };
+}
+
+// A stored preset → the shape the export UI uses (entityState + format), plus
+// the built spec that a Schedule can run.
+function serializePreset(p) {
+  let state = null, spec = [];
+  try { state = p.state ? JSON.parse(p.state) : null; } catch { /* ignore */ }
+  try { spec = JSON.parse(p.spec); } catch { /* ignore */ }
+  return { id: p.id, name: p.name, format: p.format, entityState: state, spec };
 }
 
 // ─── Action ───────────────────────────────────────────────────────────────────
@@ -392,6 +406,25 @@ export async function action({ request }) {
 
   const formData = await request.formData();
   const format = formData.get("format") ?? "csv";
+  const intent = formData.get("intent");
+
+  // Save / delete a named export preset (server-persisted so it sticks and can
+  // be picked by a Schedule).
+  if (intent === "savePreset") {
+    const { savePreset } = await import("../db/exportPreset.server.js");
+    const name = String(formData.get("name") || "").trim();
+    if (!name) return data({ error: "Preset name is required." }, { status: 400 });
+    let spec = [], state = null;
+    try { spec = JSON.parse(String(formData.get("spec") || "[]")); } catch { /* ignore */ }
+    try { state = formData.get("state") ? JSON.parse(String(formData.get("state"))) : null; } catch { /* ignore */ }
+    const p = await savePreset({ shop: session.shop, name, format, spec, state });
+    return { presetSaved: true, preset: { id: p.id, name: p.name, format: p.format, entityState: state, spec } };
+  }
+  if (intent === "deletePreset") {
+    const { deletePreset } = await import("../db/exportPreset.server.js");
+    await deletePreset(session.shop, String(formData.get("id")));
+    return { presetDeleted: true, id: String(formData.get("id")) };
+  }
 
   // Per-entity specs: [{ entity, filters?, fields? }, …]
   let specs = [];
@@ -399,6 +432,16 @@ export async function action({ request }) {
 
   if (!Array.isArray(specs) || specs.length === 0) {
     return data({ error: "Select at least one entity to export." }, { status: 400 });
+  }
+
+  // Sheet Permissions (Settings): drop any entity blocked there, so a stale UI
+  // or crafted request can't export a disallowed entity.
+  const { getAppSettings } = await import("../db/appSettings.server.js");
+  const { blockedEntities } = await getAppSettings(session.shop);
+  const blocked = new Set(blockedEntities);
+  specs = specs.filter((s) => !blocked.has(s.entity));
+  if (specs.length === 0) {
+    return data({ error: "Those entities are disabled in Sheet Permissions (Settings)." }, { status: 400 });
   }
 
   try {
@@ -419,13 +462,13 @@ const FORMAT_LABELS = { csv: "CSV", excel: "Excel", xml: "XML", json: "JSON" };
 // Conditions for the dynamic filter builder. Order matters — the first is
 // the default for a new row. The two "empty" operators take no value.
 const FILTER_OPERATORS = [
-  { value: "equals_any", label: "Equals to any of" },
-  { value: "contains_any", label: "Contains any of" },
-  { value: "contains_none", label: "Contains none of" },
-  { value: "not_equal_any", label: "Not equal to any of" },
-  { value: "starts_with_any", label: "Starts with any of" },
-  { value: "is_empty", label: "Is empty" },
-  { value: "is_not_empty", label: "Is not empty" },
+  { value: "equals_any", label: "equals to any of" },
+  { value: "contains_any", label: "contains any of" },
+  { value: "contains_none", label: "contains none of" },
+  { value: "not_equal_any", label: "not equal to any of" },
+  { value: "starts_with_any", label: "starts with any of" },
+  { value: "is_empty", label: "is empty" },
+  { value: "is_not_empty", label: "is not empty" },
 ];
 const VALUELESS_OPERATORS = new Set(["is_empty", "is_not_empty"]);
 
@@ -466,6 +509,7 @@ const ENTITY_ICONS = {
 export default function ExportPage() {
   const loaderData = useLoaderData();
   const dataFetcher = useFetcher(); // lazily fetches the heavy counts + dynamic columns
+  const presetFetcher = useFetcher(); // persists saved presets
 
   // The page shell renders immediately; kick off the counts fetch on mount so
   // they populate a moment later (instead of blocking the page from opening).
@@ -486,21 +530,25 @@ export default function ExportPage() {
   );
   const dynGroupsFor = (entity) => (entity === "products" ? productDynamicGroups : EMPTY_DYN_GROUPS);
 
-  const [format, setFormat] = useState("csv");
+  const [format, setFormat] = useState(loaderData.defaultFormat ?? "csv");
 
   // Preset state. "Latest Export" and "New Export" are built-in presets;
   // savedPresets holds user-saved configurations. presetName backs the
   // save modal's input; lastConfig captures the most recent export so
   // "Latest Export" can restore it.
   const [preset, setPreset] = useState("New Export");
-  const [savedPresets, setSavedPresets] = useState([]);
+  const [savedPresets, setSavedPresets] = useState(() => loaderData.presets ?? []);
   const [presetName, setPresetName] = useState("");
   const [lastConfig, setLastConfig] = useState(null);
 
   // Per-entity state: { enabled, filters: {key→value}, selectedFields: string[] }
   const [entityState, setEntityState] = useState(() => initialEntityState());
 
-  const enabledEntities = ENTITIES.filter((e) => entityState[e].enabled);
+  // Sheet Permissions (Settings): entities blocked there are hidden here and
+  // can't be exported. `visibleEntities` drives both the cards and the specs.
+  const blocked = new Set(loaderData.blockedEntities ?? []);
+  const visibleEntities = ENTITIES.filter((e) => !blocked.has(e));
+  const enabledEntities = visibleEntities.filter((e) => entityState[e].enabled);
 
   function setEntityEnabled(key, value) {
     setEntityState((prev) => ({ ...prev, [key]: { ...prev[key], enabled: value } }));
@@ -555,9 +603,10 @@ export default function ExportPage() {
   // pollFetcher.data can still hold the previous job's result (e.g. 100%), so
   // gating on jobId stops the progress bar from flashing the old value and
   // "jumping back" the moment a new export starts.
-  const poll = pollFetcher.data?.polledJob?.jobId === pollingJobId
+  const poll = (pollFetcher.data?.polledJob?.jobId === pollingJobId
     ? pollFetcher.data.polledJob
-    : null;
+    : null)
+    ?? (loaderData.polledJob?.jobId === pollingJobId ? loaderData.polledJob : null);
 
   // Each popover matches the width of its full-width trigger (s-popover has
   // no "match trigger" option), so we measure the trigger and feed its pixel
@@ -571,6 +620,12 @@ export default function ExportPage() {
   useEffect(() => {
     if ((result?.mode === "bulk" || result?.mode === "job") && result.jobId) setPollingJobId(result.jobId);
   }, [result]);
+
+  // Opened from a Recent-activity "#" link (/app/export?jobId=…) — show that job.
+  useEffect(() => {
+    if (loaderData.polledJob?.jobId) setPollingJobId(loaderData.polledJob.jobId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // One immediate poll when a NEW export starts, so the job + progress show up
   // right away. Keyed only on pollingJobId (NOT pollFetcher) so it fires once
@@ -597,7 +652,7 @@ export default function ExportPage() {
     setPreset(name);
     if (name === "New Export") {
       setEntityState(initialEntityState());
-      setFormat("csv");
+      setFormat(loaderData.defaultFormat ?? "csv");
     } else if (name === "Latest Export") {
       if (lastConfig) { setFormat(lastConfig.format); setEntityState(lastConfig.entityState); }
     } else {
@@ -606,22 +661,10 @@ export default function ExportPage() {
     }
   }
 
-  // Save the current configuration as a named preset (overwrites same name).
-  function savePreset() {
-    const name = presetName.trim();
-    if (!name) return;
-    setSavedPresets((prev) => [...prev.filter((p) => p.name !== name), { name, format, entityState }]);
-    setPreset(name);
-    setPresetName("");
-  }
-
-  function handleExport() {
-    setPollingJobId(null);
-    setLastConfig({ format, entityState });
-
-    // Build one spec per enabled entity. We omit `fields` when the user
-    // hasn't deselected anything (so the backend uses defaults / all).
-    const specs = enabledEntities.map((e) => {
+  // Build one spec per enabled entity (filters + column selection). Shared by
+  // Export and Save-preset so a preset captures exactly what an export would run.
+  function buildSpecs() {
+    return enabledEntities.map((e) => {
       const s = entityState[e];
       const all = allFieldsFor(e, dynGroupsFor(e));
       const defs = FILTERS_BY_ENTITY[e] ?? [];
@@ -639,8 +682,6 @@ export default function ExportPage() {
         ? undefined
         : s.selectedFields;
 
-      // Keep only rows that are actually usable: a column, an operator, and
-      // (unless the operator is value-less) a non-empty value.
       const advancedFilters = (s.advancedFilters ?? [])
         .filter((r) => r.column && r.operator &&
           (VALUELESS_OPERATORS.has(r.operator) || r.value.trim() !== ""))
@@ -648,10 +689,30 @@ export default function ExportPage() {
 
       return { entity: e, filters, fields, advancedFilters };
     });
+  }
+
+  // Save the current configuration as a named preset — persisted server-side so
+  // it survives reloads and can be picked by a Schedule.
+  function savePreset() {
+    const name = presetName.trim();
+    if (!name) return;
+    const spec = buildSpecs();
+    presetFetcher.submit(
+      { intent: "savePreset", name, format, spec: JSON.stringify(spec), state: JSON.stringify(entityState) },
+      { method: "post" },
+    );
+    setSavedPresets((prev) => [...prev.filter((p) => p.name !== name), { name, format, entityState, spec }]);
+    setPreset(name);
+    setPresetName("");
+  }
+
+  function handleExport() {
+    setPollingJobId(null);
+    setLastConfig({ format, entityState });
 
     const formData = new FormData();
     formData.set("format", format);
-    formData.set("specs", JSON.stringify(specs));
+    formData.set("specs", JSON.stringify(buildSpecs()));
 
     fetcher.submit(formData, { method: "post" });
   }
@@ -707,7 +768,7 @@ export default function ExportPage() {
         <s-section heading="Entities to export">
           <s-stack direction="block" gap="base">
             <div style={entityGrid}>
-              {ENTITIES.map((e) => {
+              {visibleEntities.map((e) => {
                 const enabled = entityState[e].enabled;
                 const locked = isExporting || isPolling;
                 return (
@@ -962,20 +1023,30 @@ export default function ExportPage() {
 
             {/* Download */}
             {downloadResult?.signedUrl && (
-              <s-banner tone="success">
-                <s-stack direction="block" gap="small-200">
-                  <s-text>Your file is ready:</s-text>
-                  <s-link href={downloadResult.signedUrl} target="_blank">
-                    {downloadResult.filename}
-                    {downloadResult.rowCount ? ` (${downloadResult.rowCount.toLocaleString()} rows)` : ""}
-                  </s-link>
-                  {downloadResult.expiresAt && (
-                    <s-text color="subdued">
-                      Link expires at {new Date(downloadResult.expiresAt).toLocaleTimeString()}.
-                    </s-text>
-                  )}
-                </s-stack>
-              </s-banner>
+              <div style={downloadBox}>
+                <div style={downloadHead}>
+                  <span style={downloadCheck}>
+                    <s-icon type="check-circle" tone="success" />
+                  </span>
+                  <span style={downloadTitle}>Your file is ready</span>
+                </div>
+                <div style={downloadFileRow}>
+                  <span style={downloadFile}>{upperFirst(downloadResult.filename)}</span>
+                  {downloadResult.rowCount ? (
+                    <s-text color="subdued">· {downloadResult.rowCount.toLocaleString()} rows</s-text>
+                  ) : null}
+                </div>
+                <div>
+                  <s-button variant="primary" icon="download" href={downloadResult.signedUrl} target="_blank">
+                    Download
+                  </s-button>
+                </div>
+                {downloadResult.expiresAt && (
+                  <s-text color="subdued">
+                    Link expires at {new Date(downloadResult.expiresAt).toLocaleTimeString()}.
+                  </s-text>
+                )}
+              </div>
             )}
 
           </s-stack>
@@ -991,6 +1062,12 @@ export default function ExportPage() {
 function capitalize(s) {
   // Title-case each underscore-separated word: "smart_collections" → "Smart Collections".
   return s.split("_").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+}
+
+// Capitalize only the first character (leaves the rest of the filename as-is).
+function upperFirst(s) {
+  const str = String(s ?? "");
+  return str.charAt(0).toUpperCase() + str.slice(1);
 }
 
 // Display names that don't follow the default title-casing of the entity key.
@@ -1502,6 +1579,36 @@ const entityCount = {
 };
 const cardHeader = {
   display: "flex", alignItems: "center", gap: ".5rem", cursor: "pointer",
+};
+// The "file is ready" success box: bordered green card with a bold title and a
+// primary download button, rather than a plain banner.
+const downloadBox = {
+  border: "1px solid #a6e0bf",
+  background: "#f0faf5",
+  borderRadius: 12,
+  padding: "1.15rem 1.35rem",
+  display: "flex",
+  flexDirection: "column",
+  gap: ".7rem",
+};
+const downloadHead = {
+  display: "flex", alignItems: "center", gap: ".5rem",
+};
+// s-icon maxes out at the "base" size token, so scale it up a touch visually.
+const downloadCheck = {
+  display: "inline-flex", transform: "scale(1.35)", transformOrigin: "center",
+};
+const downloadTitle = {
+  fontSize: "1.2rem", fontWeight: 700, color: "#0c5132", lineHeight: 1.2,
+};
+const downloadFileRow = {
+  display: "flex", alignItems: "center", gap: ".4rem", flexWrap: "wrap",
+};
+// The filename set apart from the surrounding text: monospace, bold, dark.
+const downloadFile = {
+  fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+  fontWeight: 600, fontSize: ".9rem", color: "#202223",
+  wordBreak: "break-all",
 };
 const sectionHeader = {
   fontSize: ".78rem", fontWeight: 600, color: "#6d7175",

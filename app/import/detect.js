@@ -28,7 +28,7 @@ import { FIELDS_BY_ENTITY } from "../export/fieldLists.js";
  * "detected Draft Orders — not yet importable", but supported ones are ranked
  * first on ties so a shared-header file leans toward something we can act on.
  */
-export const SUPPORTED_ENTITIES = ["products", "orders", "customers", "redirects"];
+export const SUPPORTED_ENTITIES = ["products", "orders", "customers", "redirects", "collections", "discounts"];
 
 /** Headers so generic they appear on nearly every entity — poor discriminators. */
 const GENERIC_HEADERS = new Set(["ID", "Command", "Top Row", "Row #", "Row Number"]);

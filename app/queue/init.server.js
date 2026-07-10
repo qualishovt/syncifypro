@@ -13,6 +13,8 @@ import { getBoss } from "./exportQueue.server.js";
 import { getImportBoss } from "./importQueue.server.js";
 import { failStaleJobs } from "../db/bulkExportJob.server.js";
 import { failStaleImportJobs } from "../db/bulkImportJob.server.js";
+import { scheduleFileCleanup } from "../db/cleanup.server.js";
+import { scheduleTick } from "../db/schedule.server.js";
 
 let started = false;
 
@@ -35,4 +37,10 @@ export function initBackground() {
   getImportBoss()
     .then(() => console.info("[pg-boss] import worker ready"))
     .catch((err) => console.error("[pg-boss] import worker failed to start:", err.message));
+
+  // Delete expired job files per each shop's chosen retention window.
+  scheduleFileCleanup();
+
+  // Run recurring scheduled exports/imports when they're due.
+  scheduleTick();
 }

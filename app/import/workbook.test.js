@@ -100,6 +100,60 @@ test("a CSV is routed by its file name when columns are ambiguous", () => {
   assert.equal(totals.importable, 1);
 });
 
+test("row filters keep only records whose top row matches (AND)", () => {
+  // Two products; a filter on vendor=Acme should drop the Globex one.
+  const csv = [
+    "ID,Command,Handle,Title,Vendor",
+    "gid://x/1,,shirt,Blue Shirt,Acme",
+    "gid://x/2,,hat,Red Hat,Globex",
+  ].join("\n");
+  const plan = [{ entity: "products", include: true, filters: [{ column: "vendor", operator: "equals", value: "Acme" }] }];
+  const { sheets, totals } = analyzeWorkbook({ fileBuffer: Buffer.from(csv), format: "csv", plan });
+  assert.equal(sheets[0].parsed, 2);
+  assert.equal(sheets[0].filteredOut, 1);
+  assert.equal(sheets[0].valid, 1);
+  assert.equal(totals.importable, 1);
+});
+
+test("blank/inactive filters import everything", () => {
+  const csv = ["ID,Command,Handle,Title", "gid://x/1,,shirt,Blue"].join("\n");
+  const plan = [{ entity: "products", include: true, filters: [{ column: "title", operator: "equals", value: "" }] }];
+  const { sheets } = analyzeWorkbook({ fileBuffer: Buffer.from(csv), format: "csv", plan });
+  assert.equal(sheets[0].filteredOut, 0);
+  assert.equal(sheets[0].valid, 1);
+});
+
+test("sheet exposes filterColumns mapping labels to snake_case keys", () => {
+  const csv = ["ID,Command,Handle,Title", "gid://x/1,,shirt,Blue"].join("\n");
+  const { sheets } = analyzeWorkbook({ fileBuffer: Buffer.from(csv), format: "csv" });
+  const cols = sheets[0].filterColumns;
+  assert.equal(cols.find((c) => c.label === "Title").key, "title");
+  assert.equal(cols.find((c) => c.label === "Handle").key, "handle");
+});
+
+test("column selection strips unselected fields but keeps identity + command", () => {
+  const csv = ["ID,Command,Handle,Title,Vendor", "gid://x/1,,shirt,Blue Shirt,Acme"].join("\n");
+  // Only import Title; vendor should be dropped, id/handle/command preserved.
+  const plan = [{ entity: "products", include: true, columns: ["title"] }];
+  const { sheets } = analyzeWorkbook({ fileBuffer: Buffer.from(csv), format: "csv", plan });
+  const row = sheets[0].validRows[0];
+  assert.equal(row.title, "Blue Shirt");
+  assert.equal(row.vendor, undefined);      // unselected → stripped
+  assert.equal(row.product_id, "gid://x/1"); // identity kept
+  assert.equal("command" in row, true);      // structural kept
+});
+
+test("Sheet Permissions: a blocked entity is marked not-importable", () => {
+  const csv = ["ID,Command,Handle,Title", "gid://x/1,,shirt,Blue"].join("\n");
+  const { sheets, totals } = analyzeWorkbook({
+    fileBuffer: Buffer.from(csv), format: "csv", filename: "Products.csv",
+    blockedEntities: ["products"],
+  });
+  assert.equal(sheets[0].ok, false);
+  assert.match(sheets[0].reason, /Sheet Permissions/);
+  assert.equal(totals.importable, 0);
+});
+
 test("a plain CSV is analyzed as a single unnamed sheet", () => {
   const csv = ["ID,Command,Handle,Title,Variant SKU", "gid://x/1,,shirt,Blue,SKU1"].join("\n");
   const { sheets, totals } = analyzeWorkbook({ fileBuffer: Buffer.from(csv), format: "csv" });

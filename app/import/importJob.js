@@ -7,18 +7,22 @@
 
 import { parseCSV } from "./parsers/csv.js";
 import { parseXLSX } from "./parsers/xlsx.js";
-import { normalizeHeaders, classifyColumns } from "./headers.js";
+import { normalizeHeaders, classifyColumns, reverseHeaderMap } from "./headers.js";
 import { detectEntity, entityFromSheetName } from "./detect.js";
-import { summarizeIntent } from "./intent.js";
-import { groupRecords } from "./assemble.js";
+import { summarizeIntent, classifyRecord, identityKeys } from "./intent.js";
+import { groupRecords, topRow } from "./assemble.js";
 import { validateProductRows } from "./validators/products.js";
 import { validateOrderRows } from "./validators/orders.js";
 import { validateCustomerRows } from "./validators/customers.js";
 import { validateRedirectRows } from "./validators/redirects.js";
+import { validateCollectionRows } from "./validators/collections.js";
+import { validateDiscountRows } from "./validators/discounts.js";
 import { upsertProducts } from "./writers/upsertProducts.js";
 import { upsertOrders } from "./writers/upsertOrders.js";
 import { upsertCustomers } from "./writers/upsertCustomers.js";
 import { upsertRedirects } from "./writers/upsertRedirects.js";
+import { upsertCollections } from "./writers/upsertCollections.js";
+import { upsertDiscounts } from "./writers/upsertDiscounts.js";
 
 /**
  * Parsers normalized to a workbook shape: a file becomes one or more sheets,
@@ -49,17 +53,21 @@ export function parseSheets(fileBuffer, format) {
 }
 
 const VALIDATORS = {
-  products:  validateProductRows,
-  orders:    validateOrderRows,
-  customers: validateCustomerRows,
-  redirects: validateRedirectRows,
+  products:    validateProductRows,
+  orders:      validateOrderRows,
+  customers:   validateCustomerRows,
+  redirects:   validateRedirectRows,
+  collections: validateCollectionRows,
+  discounts:   validateDiscountRows,
 };
 
 const WRITERS = {
-  products:  upsertProducts,
-  orders:    upsertOrders,
-  customers: upsertCustomers,
-  redirects: upsertRedirects,
+  products:    upsertProducts,
+  orders:      upsertOrders,
+  customers:   upsertCustomers,
+  redirects:   upsertRedirects,
+  collections: upsertCollections,
+  discounts:   upsertDiscounts,
 };
 
 /** Number of sample rows the analyze step returns for UI preview. */
@@ -83,7 +91,7 @@ const SAMPLE_ROW_COUNT = 5;
  * @param {string} [options.entity="auto"] - entity key, or "auto" to detect
  * @returns {object} per-sheet analysis
  */
-export function analyzeSheet({ rawRows, name = null, entity = "auto", include = true }) {
+export function analyzeSheet({ rawRows, name = null, entity = "auto", include = true, filters = null, selectedColumns = null, blockedEntities = [] }) {
   const rawHeaders = rawRows.length > 0 ? Object.keys(rawRows[0]) : [];
 
   // Explicit "ignore" (user unticked the sheet) — report it, import nothing.
@@ -125,6 +133,16 @@ export function analyzeSheet({ rawRows, name = null, entity = "auto", include = 
     };
   }
 
+  // Sheet Permissions (Settings): a blocked entity can't be imported.
+  if (blockedEntities.includes(resolvedEntity)) {
+    return {
+      ok: false, included: true, name, entity: resolvedEntity, detection,
+      reason: `Importing "${capitalizeEntity(resolvedEntity)}" is disabled in Sheet Permissions (Settings).`,
+      parsed: rawRows.length, valid: 0, invalid: 0,
+      detectedColumns: rawHeaders, columns, unknownColumns,
+    };
+  }
+
   const validator = VALIDATORS[resolvedEntity];
   if (!validator) {
     return {
@@ -139,8 +157,17 @@ export function analyzeSheet({ rawRows, name = null, entity = "auto", include = 
   // validators/writers read the same keys the export normalizer produced.
   // This is what makes an exported file re-importable (self-consistent
   // round-trip). Unknown/dynamic columns pass through untouched.
-  const rows = normalizeHeaders(rawRows, resolvedEntity);
+  const allRows = normalizeHeaders(rawRows, resolvedEntity);
+  // Row filters (from the plan) drop non-matching records before validation.
+  const filtered = applyRowFilters(allRows, filters);
+  // Column selection (from the plan) strips unselected fields so the writer
+  // only touches the columns the merchant chose (identity + Command always kept).
+  const rows = selectColumns(filtered, resolvedEntity, selectedColumns);
   const { valid, errors: validationErrors } = validator(rows);
+
+  // Filterable/selectable columns: humanized label → the snake_case key.
+  const revMap = safeReverseMap(resolvedEntity);
+  const filterColumns = rawHeaders.map((h) => ({ key: revMap.get(h) ?? h, label: h }));
 
   return {
     ok: true,
@@ -148,17 +175,69 @@ export function analyzeSheet({ rawRows, name = null, entity = "auto", include = 
     name,
     entity: resolvedEntity,
     detection,
-    parsed:  rows.length,
+    parsed:  allRows.length,
+    filteredOut: allRows.length - rows.length,
     valid:   valid.length,
     invalid: validationErrors.length,
     validationErrors,
     detectedColumns: rawHeaders,
     columns,
     unknownColumns,
+    filterColumns,
     sampleRows: rows.slice(0, SAMPLE_ROW_COUNT),
     intent: summarizeIntent(rows, resolvedEntity),
     validRows:  valid,
   };
+}
+
+function safeReverseMap(entity) {
+  try { return reverseHeaderMap(entity); } catch { return new Map(); }
+}
+
+/** True if a record's top row satisfies every active filter (AND). */
+function matchesFilters(top, filters) {
+  return filters.every((f) => {
+    const cell = String(top[f.column] ?? "").trim().toLowerCase();
+    const val = String(f.value ?? "").trim().toLowerCase();
+    switch (f.operator) {
+      case "is_empty":     return cell === "";
+      case "is_not_empty": return cell !== "";
+      case "equals":       return cell === val;
+      case "not_equal":    return cell !== val;
+      case "contains":     return cell.includes(val);
+      case "not_contains": return !cell.includes(val);
+      case "starts_with":  return cell.startsWith(val);
+      default:             return true;
+    }
+  });
+}
+
+// Keys that must survive column selection regardless of the merchant's choice:
+// the Command drives create/update/delete, top_row assembles variant groups.
+const ALWAYS_KEEP = ["command", "top_row"];
+
+/**
+ * Keep only the selected columns on every row (plus identity + structural keys),
+ * so the writer leaves unselected fields on the existing object untouched.
+ * `columns` is a list of snake_case keys; null/empty means keep everything.
+ */
+function selectColumns(rows, entity, columns) {
+  if (!columns || columns.length === 0) return rows;
+  const keep = new Set([...columns, ...ALWAYS_KEEP, ...identityKeys(entity)]);
+  return rows.map((r) => {
+    const out = {};
+    for (const k of Object.keys(r)) if (keep.has(k)) out[k] = r[k];
+    return out;
+  });
+}
+
+/** Keep only records (groups) whose top row matches the active row filters. */
+function applyRowFilters(rows, filters) {
+  const active = (filters ?? []).filter((f) =>
+    f.column && f.operator &&
+    (f.operator === "is_empty" || f.operator === "is_not_empty" || String(f.value ?? "").trim() !== ""));
+  if (!active.length) return rows;
+  return groupRecords(rows).filter((g) => matchesFilters(topRow(g), active)).flat();
 }
 
 /**
@@ -182,7 +261,7 @@ export function analyzeSheet({ rawRows, name = null, entity = "auto", include = 
  *   hint for a single unnamed sheet (a CSV) — "Products.csv" → Products.
  * @returns {{ sheets: object[], totals: object }}
  */
-export function analyzeWorkbook({ fileBuffer, format, entity = "auto", plan = null, filename = null }) {
+export function analyzeWorkbook({ fileBuffer, format, entity = "auto", plan = null, filename = null, blockedEntities = [] }) {
   const parsed = parseSheets(fileBuffer, format);
   // Drop entirely empty sheets (Excel often trails blank ones).
   const nonEmpty = parsed.filter((s) => s.rows.length > 0);
@@ -197,6 +276,9 @@ export function analyzeWorkbook({ fileBuffer, format, entity = "auto", plan = nu
         name: s.name ?? (nonEmpty.length === 1 ? nameFromFile : null),
         entity: p?.entity ?? entity,
         include: p?.include ?? true,
+        filters: p?.filters ?? null,
+        selectedColumns: p?.columns ?? null,
+        blockedEntities,
       });
     });
 
@@ -243,12 +325,35 @@ function capitalizeEntity(s) {
  * @param {import("@shopify/shopify-app-remix/server").AdminApiContext} options.admin
  * @returns {Promise<{ created: number, updated: number, errors: object[] }>}
  */
-export async function applyImport({ validRows, entity, admin, onProgress }) {
+export async function applyImport({ validRows, entity, admin, onProgress, options = {} }) {
   const writer = WRITERS[entity];
   if (!writer) throw new Error(`No writer for entity: ${entity}`);
 
-  if (validRows.length === 0) return { created: 0, updated: 0, deleted: 0, errors: [] };
-  return writer(validRows, admin, { onProgress });
+  // Import mode filters records before writing (update-only / create-only /
+  // no-delete), and dry-run reports what WOULD happen without writing.
+  const mode = options.mode || "normal";
+  const rows = mode === "normal" ? validRows : filterRecordsByMode(validRows, entity, mode);
+
+  if (mode === "dryRun") {
+    const intent = summarizeIntent(rows, entity);
+    return { created: intent.create, updated: intent.update, deleted: intent.delete, errors: [], dryRun: true };
+  }
+
+  if (rows.length === 0) return { created: 0, updated: 0, deleted: 0, errors: [] };
+  return writer(rows, admin, { onProgress });
+}
+
+/** Keep only the records an import mode should write; returns flat rows. */
+function filterRecordsByMode(validRows, entity, mode) {
+  if (mode !== "noDelete" && mode !== "createOnly" && mode !== "updateOnly") return validRows;
+  const groups = groupRecords(validRows).filter((g) => {
+    const cls = classifyRecord(topRow(g), entity);
+    if (mode === "noDelete") return cls !== "delete";
+    if (mode === "createOnly") return cls === "create";
+    if (mode === "updateOnly") return cls === "update";
+    return true;
+  });
+  return groups.flat();
 }
 
 /**
@@ -290,23 +395,26 @@ const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.s
  * @param {string} options.jobId
  * @param {Array<{entity?: string, include?: boolean}>} [options.plan] - per-sheet overrides from the preview
  */
-export async function runImportForJob({ admin, shop, jobId, plan = null }) {
+export async function runImportForJob({ admin, shop, jobId, plan = null, options = {} }) {
   const [
     { getImportJob, markImportRunning, updateImportProgress, markImportComplete, markImportFailed },
     { downloadFromR2, putToR2, signDownloadUrl },
     { buildResultsWorkbook },
+    { getAppSettings },
   ] = await Promise.all([
     import("../db/bulkImportJob.server.js"),
     import("../export/delivery/r2.js"),
     import("./results.js"),
+    import("../db/appSettings.server.js"),
   ]);
 
   const job = await getImportJob(jobId);
   if (!job) throw new Error(`Import job not found: ${jobId}`);
 
   try {
+    const { blockedEntities } = await getAppSettings(shop);
     const fileBuffer = await downloadFromR2(job.sourceR2Key);
-    const { sheets } = analyzeWorkbook({ fileBuffer, format: job.format, plan, filename: job.filename });
+    const { sheets } = analyzeWorkbook({ fileBuffer, format: job.format, plan, filename: job.filename, blockedEntities });
 
     // Progress is counted in records across the sheets we can actually write.
     const progressTotal = sheets
@@ -324,6 +432,7 @@ export async function runImportForJob({ admin, shop, jobId, plan = null }) {
         validRows: s.validRows,
         entity: s.entity,
         admin,
+        options,
         onProgress: (n) => {
           done += n;
           // Best-effort live update; the final count is set on completion.

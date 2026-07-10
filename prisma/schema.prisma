@@ -49,6 +49,10 @@ model BulkImportJob {
   filename        String?
   // R2 key of the staged upload the worker downloads to do the import.
   sourceR2Key     String?
+  // The per-sheet plan JSON ([{entity,include,filters,columns}]) and import
+  // options JSON ({mode}) this job ran with, so "Repeat" reuses the same config.
+  plan            String?
+  options         String?
   // Live progress for the determinate bar: records written vs. total importable.
   progressCurrent Int?
   progressTotal   Int?
@@ -102,4 +106,118 @@ model BulkExportJob {
 
   @@index([shop])
   @@index([bulkOperationId])
+}
+
+model AppSettings {
+  shop          String   @id
+  // Days after which a job's downloadable files are deleted from R2 (the job
+  // row + its history/number are kept). 0 = never delete.
+  retentionDays Int      @default(7)
+  // Defaults pre-selected on the Export/Import pages.
+  defaultExportFormat String @default("csv")   // csv | excel | xml | json
+  defaultImportMode   String @default("normal") // normal | updateOnly | createOnly | noDelete | dryRun
+  // IANA time zone used to DISPLAY job/schedule timestamps (cadence math stays UTC).
+  timezone      String   @default("UTC")
+  // Email notifications for finished jobs (delivery wired separately).
+  notifyEmail     String?
+  notifyOnSuccess Boolean @default(false)
+  notifyOnError   Boolean @default(false)
+  // Security: allow a job's files to be downloaded by external services via
+  // their signed link (vs. in-app download only).
+  allowExternalDownloads Boolean @default(true)
+  // Sheet Permissions: JSON array of entity keys that are BLOCKED from export/
+  // import (empty/null = everything allowed).
+  blockedEntities String?
+  updatedAt     DateTime @updatedAt
+}
+
+// A recurring export or import. When due, the scheduler creates a normal job
+// (BulkExportJob / BulkImportJob) so the run shows up in Recent activity.
+model Schedule {
+  id          String    @id @default(cuid())
+  shop        String
+  type        String    // "export" | "import"
+  name        String?
+  enabled     Boolean   @default(true)
+  // Cadence (evaluated in UTC).
+  frequency   String    // "hourly" | "daily" | "weekly" | "monthly"
+  hour        Int       @default(3)   // 0-23
+  minute      Int       @default(0)   // 0-59
+  weekday     Int?      // 0=Sun..6=Sat (weekly)
+  monthday    Int?      // 1-31 (monthly)
+  // What to run.
+  entity      String?   // export: comma-list of entities; import: detected entity (display)
+  format      String    @default("csv")
+  // Export: full spec JSON [{entity,filters,fields,advancedFilters}] from a saved
+  // preset. When set it drives the run (filters/columns); else `entity` is used.
+  spec        String?
+  // Import source — a schedule-owned R2 copy, re-imported each run (not touched
+  // by file-retention cleanup, which only clears job files).
+  sourceR2Key String?
+  filename    String?
+  plan        String?   // import per-sheet plan JSON [{entity,include,filters,columns}]
+  options     String?   // import options JSON ({mode}) — update-only/no-delete/etc.
+  lastRunAt   DateTime?
+  nextRunAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([shop])
+  @@index([enabled, nextRunAt])
+}
+
+// A saved export configuration (entities + filters + column selection). Persisted
+// so it survives reloads AND can be picked by a Schedule to run filtered exports.
+model ExportPreset {
+  id        String   @id @default(cuid())
+  shop      String
+  name      String
+  format    String   @default("csv")
+  spec      String   // JSON: [{ entity, filters, fields, advancedFilters }]
+  state     String?  // JSON: the export UI's entityState, for restoring the form
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([shop, name])
+  @@index([shop])
+}
+
+// A saved import configuration (per-sheet plan + import mode). The twin of
+// ExportPreset: persisted so a plan can be reused on the Import page and picked
+// by a Schedule to re-import a file with the same filters/columns/mode.
+model ImportPreset {
+  id        String   @id @default(cuid())
+  shop      String
+  name      String
+  format    String   @default("csv")
+  plan      String   // JSON: [{ entity, include, filters, columns }]
+  options   String?  // JSON: { mode }
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([shop, name])
+  @@index([shop])
+}
+
+// A stored Etsy OAuth connection for the Migrations feature (one per shop). The
+// keystring is the merchant's Etsy app client id; tokens refresh via Etsy.
+model EtsyConnection {
+  shop         String   @id
+  keystring    String
+  accessToken  String
+  refreshToken String
+  expiresAt    DateTime
+  etsyShopId   String?
+  etsyShopName String?
+  updatedAt    DateTime @updatedAt
+}
+
+// Short-lived state for the Etsy OAuth handshake — bridges the authorize
+// redirect and the callback (holds the PKCE verifier + which shop started it).
+model MigrationOAuthState {
+  state        String   @id
+  shop         String
+  keystring    String
+  codeVerifier String
+  redirectUri  String
+  createdAt    DateTime @default(now())
 }

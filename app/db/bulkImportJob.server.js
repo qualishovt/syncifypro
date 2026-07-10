@@ -13,9 +13,14 @@
 import db from "../db.server.js";
 import { nextJobNumber } from "./jobNumber.server.js";
 
-/** Create a pending import job for a freshly staged upload. */
+/**
+ * Create a pending import job for a freshly staged upload.
+ * `plan`/`options` are objects; they're persisted as JSON so "Repeat" can
+ * re-run the import with the same per-sheet plan (filters/columns) and mode.
+ */
 export async function createImportJob({
   shop, entity, format, filename = null, sourceR2Key, progressTotal = null,
+  plan = null, options = null,
 }) {
   // Assign the shared per-shop job number + create in one transaction.
   return db.$transaction(async (tx) => {
@@ -26,6 +31,8 @@ export async function createImportJob({
         status: "pending",
         progressCurrent: 0,
         progressTotal,
+        plan: plan == null ? null : JSON.stringify(plan),
+        options: options == null ? null : JSON.stringify(options),
       },
     });
   });
