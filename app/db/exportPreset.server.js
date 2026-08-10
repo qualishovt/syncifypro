@@ -18,11 +18,13 @@ export async function getPreset(shop, id) {
 }
 
 /** Create or overwrite a named preset. `spec`/`state` are objects (stored as JSON). */
-export async function savePreset({ shop, name, format, spec, state }) {
+export async function savePreset({ shop, name, format, spec, state, splitRows, options }) {
   const data = {
     format: format || "csv",
     spec: JSON.stringify(spec ?? []),
     state: state == null ? null : JSON.stringify(state),
+    splitRows: Number.isInteger(splitRows) && splitRows > 0 ? splitRows : null,
+    options: options == null ? null : JSON.stringify(options),
   };
   return db.exportPreset.upsert({
     where: { shop_name: { shop, name } },

@@ -1,0 +1,17 @@
+[
+ {
+  "name": "discounts diagnostic run",
+  "ok": true,
+  "detail": "created=0 failed=1"
+ },
+ {
+  "name": "zip DELETE by id (redirect + collection)",
+  "ok": false,
+  "detail": "deleted 1/2, failed 0"
+ },
+ {
+  "name": "leftovers cleaned",
+  "ok": true,
+  "detail": "0 e2e redirects remain"
+ }
+]

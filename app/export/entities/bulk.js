@@ -532,6 +532,15 @@ export const BULK_ENTITIES = Object.keys(BULK_QUERY_BUILDERS);
  * Get the store's count for an entity (used to decide direct vs bulk).
  * @returns {Promise<number>}
  */
+/**
+ * Whether the entity has a REAL count query. getEntityCount answers 0 (and
+ * Infinity for articles/files) for the rest — fine for the bulk-threshold
+ * decision, but poison for a progress-bar total.
+ */
+export function hasEntityCount(entity) {
+  return entity !== "articles" && entity !== "files" && Boolean(COUNT_FIELDS[entity]);
+}
+
 export async function getEntityCount(admin, entity) {
   // Articles and files have no count query in the Admin API, so we can't size
   // them up front. Treat them as "large" so streamable-format exports route to

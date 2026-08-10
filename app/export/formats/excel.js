@@ -17,6 +17,7 @@
  * handles csv/json/xml; Excel is built fully in memory.
  */
 
+import { Buffer } from "node:buffer";
 import { resolveColumns, columnHeader } from "./columns.js";
 import { zipParts } from "./zip.js";
 
@@ -48,6 +49,7 @@ export function toExcelWorkbook(sheets) {
     { name: "_rels/.rels",                data: Buffer.from(ROOT_RELS, "utf8") },
     { name: "xl/workbook.xml",            data: Buffer.from(workbookXml(sheetMetas), "utf8") },
     { name: "xl/_rels/workbook.xml.rels", data: Buffer.from(workbookRels(sheetMetas), "utf8") },
+    { name: "xl/styles.xml",              data: Buffer.from(STYLES_XML, "utf8") },
     ...sheetMetas.map((m) => ({
       name: m.partPath,
       data: Buffer.from(buildSheetXml(m.rows, m.cols), "utf8"),
@@ -76,6 +78,7 @@ function contentTypes(metas) {
 <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
 <Default Extension="xml" ContentType="application/xml"/>
 <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
 ${overrides}
 </Types>`;
 }
@@ -99,22 +102,39 @@ function workbookRels(metas) {
   const rels = metas
     .map((m) => `<Relationship Id="rId${m.index}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${m.index}.xml"/>`)
     .join("");
+  const stylesRel = `<Relationship Id="rId${metas.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>`;
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-${rels}
+${rels}${stylesRel}
 </Relationships>`;
 }
+
+// Style 0 = default; style 1 = header (bold on a light-blue fill).
+const STYLES_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>
+<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFDDEBF7"/><bgColor indexed="64"/></patternFill></fill></fills>
+<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
+<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/></cellXfs>
+</styleSheet>`;
 
 // ─── worksheet XML ────────────────────────────────────────────────────────────
 
 function buildSheetXml(rows, cols) {
+  // Freeze the header row plus the first two columns (Matrixify/Altera do the
+  // same), so both stay put while scrolling. Narrow sheets freeze what exists.
+  const xSplit = cols.length > 2 ? 2 : Math.max(cols.length - 1, 0);
+  const pane = `<pane${xSplit > 0 ? ` xSplit="${xSplit}"` : ""} ySplit="1" topLeftCell="${colLetter(xSplit)}2" activePane="bottomRight" state="frozen"/>`;
+
   const parts = [
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
     '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
+    `<sheetViews><sheetView workbookViewId="0">${pane}</sheetView></sheetViews>`,
     "<sheetData>",
   ];
 
-  parts.push(rowXml(1, cols.map(columnHeader)));
+  parts.push(rowXml(1, cols.map(columnHeader), HEADER_STYLE));
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     parts.push(rowXml(i + 2, cols.map((c) => row[c] ?? "")));
@@ -124,10 +144,14 @@ function buildSheetXml(rows, cols) {
   return parts.join("");
 }
 
-function rowXml(rowNumber, values) {
+// cellXfs index of the bold light-blue header style in STYLES_XML.
+const HEADER_STYLE = 1;
+
+function rowXml(rowNumber, values, styleId) {
+  const s = styleId ? ` s="${styleId}"` : "";
   const cells = values.map((value, colIndex) => {
     const ref = `${colLetter(colIndex)}${rowNumber}`;
-    return `<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${escapeXml(value)}</t></is></c>`;
+    return `<c r="${ref}"${s} t="inlineStr"><is><t xml:space="preserve">${escapeXml(value)}</t></is></c>`;
   });
   return `<row r="${rowNumber}">${cells.join("")}</row>`;
 }

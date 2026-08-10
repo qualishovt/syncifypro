@@ -26,6 +26,7 @@ const retentionLabel = (d) => (d === 0 ? "Never — keep forever" : `${d} day${d
 const FORMAT_CHOICES = [
   { value: "csv", label: "CSV" }, { value: "excel", label: "Excel" },
   { value: "xml", label: "XML" }, { value: "json", label: "JSON" },
+  { value: "pdf", label: "PDF" },
 ];
 const IMPORT_MODE_CHOICES = [
   { value: "normal", label: "Normal — follow the Command column" },
@@ -96,6 +97,15 @@ const PERMISSION_ENTITIES = [
   { key: "collections",  label: "Collections" },
   { key: "discounts",    label: "Discounts" },
   { key: "draft_orders", label: "Draft orders" },
+  { key: "gift_cards",   label: "Gift cards" },
+  { key: "inventory",    label: "Inventory" },
+  { key: "selling_plans", label: "Selling plans" },
+  { key: "metafields",   label: "Metafields" },
+  { key: "segments",     label: "Customer segments" },
+  { key: "store_credit", label: "Store credit" },
+  { key: "markets",      label: "Markets" },
+  { key: "delivery_profiles", label: "Shipping profiles" },
+  { key: "product_media", label: "Product media" },
   { key: "content",      label: "Content (pages, blogs, articles)" },
   { key: "redirects",    label: "Redirects" },
   { key: "companies",    label: "Companies" },
@@ -153,7 +163,7 @@ export async function action({ request }) {
 
   const patchByIntent = {
     saveDefaults: {
-      defaultExportFormat: String(fd.get("defaultExportFormat") || "csv"),
+      defaultExportFormat: String(fd.get("defaultExportFormat") || "excel"),
       defaultImportMode: String(fd.get("defaultImportMode") || "normal"),
     },
     saveNotifications: {

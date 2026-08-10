@@ -1,0 +1,67 @@
+[
+ {
+  "name": "import products csv (create)",
+  "ok": true,
+  "detail": "created E2E Product 1785088085954 (DRAFT)"
+ },
+ {
+  "name": "import products csv (DELETE)",
+  "ok": true,
+  "detail": "deleted + verified gone"
+ },
+ {
+  "name": "import multi-sheet xlsx (create both)",
+  "ok": true,
+  "detail": "product + customer created and verified"
+ },
+ {
+  "name": "import multi-sheet xlsx (DELETE both)",
+  "ok": true,
+  "detail": "both deleted"
+ },
+ {
+  "name": "import zip of csvs (redirect + collection)",
+  "ok": true,
+  "detail": "redirect + collection created and verified"
+ },
+ {
+  "name": "import zip of csvs (DELETE both)",
+  "ok": false,
+  "detail": "deleted=0 failed=0"
+ },
+ {
+  "name": "import gift cards csv (create)",
+  "ok": true,
+  "detail": "created gift card 531413762223, balance 1.0"
+ },
+ {
+  "name": "import gift cards csv (DELETE = deactivate)",
+  "ok": true,
+  "detail": "deactivated + verified"
+ },
+ {
+  "name": "import discounts csv (create)",
+  "ok": false,
+  "detail": "created=0 failed=1"
+ },
+ {
+  "name": "import discounts csv (DELETE)",
+  "ok": false,
+  "detail": "deleted=0 failed=1"
+ },
+ {
+  "name": "import orders csv (dry run)",
+  "ok": true,
+  "detail": "dry run finished (created=1, failed=0) — no store writes"
+ },
+ {
+  "name": "import with plan (row filter + column selection)",
+  "ok": true,
+  "detail": "row filter worked; vendor=dataengine (column selection: vendor excluded)"
+ },
+ {
+  "name": "import plan cleanup (DELETE)",
+  "ok": true,
+  "detail": "cleaned up"
+ }
+]

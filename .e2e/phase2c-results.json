@@ -1,0 +1,27 @@
+[
+ {
+  "name": "collections create",
+  "ok": true,
+  "detail": "created"
+ },
+ {
+  "name": "collections DELETE by handle (command now mapped)",
+  "ok": true,
+  "detail": "deleted + verified gone"
+ },
+ {
+  "name": "cleanup leftover e2e collections",
+  "ok": true,
+  "detail": "deleted 1/1"
+ },
+ {
+  "name": "discounts create (startsAt defaulted)",
+  "ok": true,
+  "detail": "created + verified"
+ },
+ {
+  "name": "discounts DELETE",
+  "ok": true,
+  "detail": "deleted"
+ }
+]

@@ -204,7 +204,8 @@ export function buildProductRows(product, startRowNumber = 1, { catalogPriceMap,
 const ORDER_TAX_CAP = 5;
 
 // Expand a taxLines array into numbered columns: <prefix>_<n>_{title,rate,price,channel_liable}.
-function taxLineCols(taxLines, prefix, cap) {
+// `presentment` adds <prefix>_<n>_presentment_price (order-level taxes only).
+function taxLineCols(taxLines, prefix, cap, { presentment = false } = {}) {
   const out = {};
   for (let i = 0; i < cap; i++) {
     const t = (taxLines ?? [])[i];
@@ -212,6 +213,7 @@ function taxLineCols(taxLines, prefix, cap) {
     out[`${prefix}_${i + 1}_title`] = t?.title ?? "";
     out[`${prefix}_${i + 1}_rate`] = rate === "" ? "" : rate;
     out[`${prefix}_${i + 1}_price`] = t?.priceSet?.shopMoney?.amount ?? "";
+    if (presentment) out[`${prefix}_${i + 1}_presentment_price`] = t?.priceSet?.presentmentMoney?.amount ?? "";
     out[`${prefix}_${i + 1}_channel_liable`] = t?.channelLiable ?? "";
   }
   return out;
@@ -240,15 +242,47 @@ export function normalizeOrder(order, lineItem) {
   const pc = order.purchasingEntity?.__typename === "PurchasingCompany" ? order.purchasingEntity : null;
   const riskAssess = (order.risk?.assessments ?? [])[0] ?? {};
 
+  // Presentment-currency amount of a MoneyBag; helpers for computed columns.
+  const pm = (set) => set?.presentmentMoney?.amount ?? "";
+  const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+  const schedule = order.paymentTerms?.paymentSchedules?.nodes?.[0] ?? {};
+  // order.customAttributes (note attributes) → "PO: 42; Delivery: Friday"
+  const additionalDetails = (order.customAttributes ?? [])
+    .map((a) => `${a.key}: ${a.value}`)
+    .join("; ");
+  // GraphQL has no totalLineItemsPriceSet — sum of pre-discount line totals.
+  const lineItemsPrice = (order.lineItems?.nodes ?? [])
+    .reduce((sum, li) => sum + num(li?.originalTotalSet?.shopMoney?.amount), 0);
+  // Line-item weight in grams, whatever unit the inventory item stores.
+  const GRAMS_PER = { GRAMS: 1, KILOGRAMS: 1000, OUNCES: 28.3495, POUNDS: 453.592 };
+  const w = invItem?.measurement?.weight;
+  const lineGrams = w?.value == null ? "" : Math.round(num(w.value) * (GRAMS_PER[w.unit] ?? 1));
+  const lineTaxTotal = (lineItem?.taxLines ?? [])
+    .reduce((s, t) => s + num(t?.priceSet?.shopMoney?.amount), 0);
+  const lineDiscountAlloc = (lineItem?.discountAllocations ?? [])
+    .reduce((s, a) => s + num(a?.allocatedAmountSet?.shopMoney?.amount), 0);
+  const lineDiscountAllocPm = (lineItem?.discountAllocations ?? [])
+    .reduce((s, a) => s + num(a?.allocatedAmountSet?.presentmentMoney?.amount), 0);
+  const lineQty = num(lineItem?.quantity);
+  const perItem = (total) => (lineItem && lineQty > 0 ? (num(total) / lineQty).toFixed(2) : "");
+  // Line total excluding tax: total when taxes are extra, total − tax when included.
+  const linePreTax = lineItem
+    ? (order.taxesIncluded
+        ? (num(lineItem?.discountedTotalSet?.shopMoney?.amount) - lineTaxTotal).toFixed(2)
+        : lineItem?.discountedTotalSet?.shopMoney?.amount ?? "")
+    : "";
+
   return {
     // Order
     order_id:           gid(order.id),
+    command:            "", // import directive
     order_name:         order.name ?? "",
     order_number:       (order.name ?? "").replace(/\D/g, ""),
     email:              order.email ?? "",
     phone:              order.phone ?? "",
     note:               order.note ?? "",
     tags:               (order.tags ?? []).join(", "),
+    tags_command:       "", // import directive
     financial_status:   order.displayFinancialStatus ?? "",
     fulfillment_status: order.displayFulfillmentStatus ?? "",
     currency:           order.currencyCode ?? "",
@@ -258,12 +292,28 @@ export function normalizeOrder(order, lineItem) {
     confirmed:          order.confirmed ?? "",
     source_name:        order.sourceName ?? "",
     source_identifier:  order.sourceIdentifier ?? "",
+    source_url:         order.registeredSourceUrl ?? "",
+    physical_location:  order.physicalLocation?.name ?? "",
+    user_id:            order.staffMember ? gid(order.staffMember.id) : "",
+    // Checkout/cart/order tokens are REST-only; not exposed in Admin GraphQL.
+    checkout_id:        "",
+    cart_token:         "",
+    token:              "",
     confirmation_number: order.confirmationNumber ?? "",
+    po_number:          order.poNumber ?? "",
+    additional_details: additionalDetails,
     send_receipt:        "", // import directive
     inventory_behaviour: "", // import directive
     cancel_send_receipt: "", // import directive
     cancel_refund:       "", // import directive
+    cancel_restock:      "", // import directive
     order_status_url:   order.statusPageUrl ?? "",
+    // Payment terms (B2B / net-payment orders; blank otherwise)
+    payment_terms_type:         order.paymentTerms?.paymentTermsType ?? "",
+    payment_terms_issued_at:    schedule.issuedAt ?? "",
+    payment_terms_due_at:       schedule.dueAt ?? "",
+    payment_terms_completed_at: schedule.completedAt ?? "",
+    payment_terms_overdue:      order.paymentTerms ? (order.paymentTerms.overdue ?? "") : "",
     line_items_quantity: order.currentSubtotalLineItemsQuantity ?? "",
     total_weight:       order.totalWeight ?? "",
     cancel_reason:      order.cancelReason ?? "",
@@ -276,8 +326,11 @@ export function normalizeOrder(order, lineItem) {
     // Totals
     total_price:        money(order.totalPriceSet),
     subtotal_price:     money(order.subtotalPriceSet),
+    total_line_items_price: lineItemsPrice ? lineItemsPrice.toFixed(2) : "",
+    current_subtotal_price: money(order.currentSubtotalPriceSet),
     total_tax:          money(order.totalTaxSet),
     total_shipping:     money(order.totalShippingPriceSet),
+    current_total_shipping: money(order.currentShippingPriceSet),
     total_discounts:    money(order.totalDiscountsSet),
     current_total_price: money(order.currentTotalPriceSet),
     total_refunded:     money(order.totalRefundedSet),
@@ -288,7 +341,20 @@ export function normalizeOrder(order, lineItem) {
     total_received:     money(order.totalReceivedSet),
     net_payment:        money(order.netPaymentSet),
     total_capturable:   money(order.totalCapturableSet),
+    total_outstanding:  money(order.totalOutstandingSet),
     tax_lines:          taxLines,
+
+    // Presentment-currency totals (differ from the shop-currency ones only
+    // when the buyer paid in another currency)
+    presentment_subtotal:          pm(order.subtotalPriceSet),
+    presentment_total_tax:         pm(order.totalTaxSet),
+    presentment_total_shipping:    pm(order.totalShippingPriceSet),
+    presentment_total_discounts:   pm(order.totalDiscountsSet),
+    presentment_total_duties:      pm(order.originalTotalDutiesSet),
+    presentment_total_fees:        pm(order.originalTotalAdditionalFeesSet),
+    presentment_total_refunded:    pm(order.totalRefundedSet),
+    presentment_total_outstanding: pm(order.totalOutstandingSet),
+    presentment_total_price:       pm(order.totalPriceSet),
 
     // Browser / UTM
     browser_ip:    order.clientIp ?? "",
@@ -305,13 +371,20 @@ export function normalizeOrder(order, lineItem) {
     // Company (B2B purchasing entity)
     company_id:            pc?.company ? gid(pc.company.id) : "",
     company_name:          pc?.company?.name ?? "",
+    company_external_id:   pc?.company?.externalId ?? "",
     company_location_id:   pc?.location ? gid(pc.location.id) : "",
     company_location_name: pc?.location?.name ?? "",
+    company_location_external_id: pc?.location?.externalId ?? "",
 
     // Risk
     risk_recommendation: order.risk?.recommendation ?? "",
     risk_level:          riskAssess.riskLevel ?? "",
+    risk_source:         riskAssess.provider?.title ?? "",
     risk_facts:          (riskAssess.facts ?? []).map((f) => `${f.description}${f.sentiment ? ` (${f.sentiment})` : ""}`).join("; "),
+    // Legacy REST risk fields with no Admin GraphQL equivalent.
+    risk_score:          "",
+    risk_cause_cancel:   "",
+    risk_message:        "",
 
     // Buyer (customer)
     customer_id:         gid(cust?.id),
@@ -365,6 +438,7 @@ export function normalizeOrder(order, lineItem) {
 
     // Items (line item; empty string when no line item)
     line_item_id:              lineItem ? gid(lineItem.id) : "",
+    line_item_command:         "", // import directive
     line_item_title:           lineItem?.title ?? "",
     line_item_name:            lineItem?.name ?? "",
     line_item_variant_title:   lineItem?.variantTitle ?? "",
@@ -377,11 +451,27 @@ export function normalizeOrder(order, lineItem) {
     line_item_discounted_price: money(lineItem?.discountedUnitPriceSet),
     line_item_total:           money(lineItem?.discountedTotalSet),
     line_item_total_discount:  money(lineItem?.totalDiscountSet),
+    line_item_discount_allocation: lineItem ? lineDiscountAlloc.toFixed(2) : "",
+    line_item_discount_per_item:   perItem(lineItem?.totalDiscountSet?.shopMoney?.amount),
+    line_item_grams:           lineItem ? lineGrams : "",
+    line_item_tax_total:       lineItem ? lineTaxTotal.toFixed(2) : "",
+    line_item_pre_tax_price:   linePreTax,
     line_item_taxable:         lineItem?.taxable ?? "",
     line_item_requires_shipping: lineItem?.requiresShipping ?? "",
     line_item_gift_card:       lineItem?.isGiftCard ?? "",
+    line_item_force_gift_card: "", // import directive
     line_item_properties:      properties,
     line_item_fulfillment_status: lineItem?.fulfillmentStatus ?? "",
+    // Per-line fulfillment service was removed from the Admin GraphQL API;
+    // kept for Matrixify/Altera header parity.
+    line_item_fulfillment_service: "",
+    // Presentment-currency line prices
+    line_item_presentment_price:    pm(lineItem?.originalUnitPriceSet),
+    line_item_presentment_currency: lineItem?.originalUnitPriceSet?.presentmentMoney?.currencyCode ?? "",
+    line_item_presentment_discount: pm(lineItem?.totalDiscountSet),
+    line_item_presentment_discount_allocation: lineItem ? lineDiscountAllocPm.toFixed(2) : "",
+    line_item_presentment_discount_per_item: perItem(lineItem?.totalDiscountSet?.presentmentMoney?.amount),
+    line_item_presentment_total:    pm(lineItem?.discountedTotalSet),
     line_item_product_id:      lineItem?.product ? gid(lineItem.product.id) : "",
     line_item_variant_id:      variant ? gid(variant.id) : "",
     line_item_product_handle:  lineItem?.product?.handle ?? "",
@@ -389,6 +479,7 @@ export function normalizeOrder(order, lineItem) {
     // Item product data (export-only, joined from the line's variant/product)
     line_item_product_type:    lineItem?.product?.productType ?? "",
     line_item_product_tags:    (lineItem?.product?.tags ?? []).join(", "),
+    line_item_variant_sku:     variant?.sku ?? "",
     line_item_variant_barcode: variant?.barcode ?? "",
     line_item_variant_weight:  invItem?.measurement?.weight?.value ?? "",
     line_item_variant_weight_unit: invItem?.measurement?.weight?.unit ?? "",
@@ -407,7 +498,9 @@ export function normalizeOrder(order, lineItem) {
     // Transaction (blank unless this is a Transaction row)
     transaction_id: "", transaction_kind: "", transaction_status: "",
     transaction_gateway: "", transaction_amount: "", transaction_currency: "",
+    transaction_shop_currency_amount: "", transaction_shop_currency: "",
     transaction_processed_at: "", transaction_payment_id: "",
+    transaction_authorization: "", transaction_force_gateway: "",
     transaction_account_number: "", transaction_error_code: "",
     transaction_test: "", transaction_parent_id: "",
     // Transaction payment details (Protected Customer Data — redacted on export)
@@ -417,11 +510,11 @@ export function normalizeOrder(order, lineItem) {
     transaction_device_id: "", transaction_user_id: "",
     // Refund (blank unless this is a Refund row)
     refund_id: "", refund_created_at: "", refund_note: "", refund_amount: "",
-    refund_currency: "", refund_restock_type: "", refund_restock_location: "",
+    refund_currency: "", refund_restock: "", refund_restock_type: "", refund_restock_location: "",
     refund_send_receipt: "", refund_generate_transaction: "", // import directives
     // Fulfillment (blank unless this is a Fulfillment row)
     fulfillment_id: "", fulfillment_display_status: "",
-    fulfillment_created_at: "", fulfillment_updated_at: "",
+    fulfillment_created_at: "", fulfillment_processed_at: "", fulfillment_updated_at: "",
     fulfillment_total_quantity: "", fulfillment_service: "",
     fulfillment_location: "", fulfillment_shipment_status: "",
     fulfillment_send_receipt: "", // import directive
@@ -429,7 +522,7 @@ export function normalizeOrder(order, lineItem) {
     fulfillment_tracking_url: "",
 
     // Numbered tax lines (order-level + this line item's)
-    ...taxLineCols(order.taxLines, "tax", ORDER_TAX_CAP),
+    ...taxLineCols(order.taxLines, "tax", ORDER_TAX_CAP, { presentment: true }),
     ...taxLineCols(lineItem?.taxLines, "line_tax", ORDER_TAX_CAP),
   };
 }
@@ -443,7 +536,11 @@ function orderTransactionFields(t) {
     transaction_gateway:    t.gateway ?? "",
     transaction_amount:     t.amountSet?.shopMoney?.amount ?? "",
     transaction_currency:   t.amountSet?.shopMoney?.currencyCode ?? "",
+    transaction_shop_currency_amount: t.amountSet?.shopMoney?.amount ?? "",
+    transaction_shop_currency:        t.amountSet?.shopMoney?.currencyCode ?? "",
     transaction_processed_at: t.processedAt ?? "",
+    transaction_authorization: t.authorizationCode ?? "",
+    transaction_force_gateway: "", // import directive
     transaction_payment_id: t.paymentId ?? "",
     transaction_account_number: t.accountNumber ?? "",
     transaction_error_code: t.errorCode ?? "",
@@ -459,6 +556,7 @@ function orderRefundFields(r) {
     refund_note:       r.note ?? "",
     refund_amount:     r.totalRefundedSet?.shopMoney?.amount ?? "",
     refund_currency:   r.totalRefundedSet?.shopMoney?.currencyCode ?? "",
+    refund_restock:          rli.restockType ? String(rli.restockType !== "NO_RESTOCK") : "",
     refund_restock_type:     rli.restockType ?? "",
     refund_restock_location: rli.location?.name ?? "",
   };
@@ -469,6 +567,8 @@ function orderFulfillmentFields(f) {
     fulfillment_id:           gid(f.id),
     fulfillment_display_status: f.displayStatus ?? f.status ?? "",
     fulfillment_created_at:   f.createdAt ?? "",
+    // REST's processed_at; GraphQL only has createdAt, which matches it.
+    fulfillment_processed_at: f.createdAt ?? "",
     fulfillment_updated_at:   f.updatedAt ?? "",
     fulfillment_total_quantity: f.totalQuantity ?? "",
     fulfillment_service:      f.service?.handle ?? "",
@@ -1127,7 +1227,7 @@ export function normalizePayout(payout) {
  * @returns {object} flat row
  */
 export function normalizeShop(shop) {
-  const a = shop.shopAddress ?? {};
+  const a = shop.billingAddress ?? {};
   const p = shop.plan ?? {};
   return {
     shop_id:          gid(shop.id),

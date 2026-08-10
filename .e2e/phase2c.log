@@ -1,0 +1,7 @@
+PASS  collections create — created
+PASS  collections DELETE by handle (command now mapped) — deleted + verified gone
+PASS  cleanup leftover e2e collections — deleted 1/1
+PASS  discounts create (startsAt defaulted) — created + verified
+PASS  discounts DELETE — deleted
+
+=== 5/5 passed ===

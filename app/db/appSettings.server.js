@@ -17,7 +17,7 @@ export const RETENTION_OPTIONS = [1, 3, 7, 14, 30, 60, 90, 0];
 /** Whole-settings defaults for a shop with no saved row. */
 export const DEFAULT_SETTINGS = {
   retentionDays: DEFAULT_RETENTION_DAYS,
-  defaultExportFormat: "csv",
+  defaultExportFormat: "excel",
   defaultImportMode: "normal",
   timezone: "UTC",
   notifyEmail: "",

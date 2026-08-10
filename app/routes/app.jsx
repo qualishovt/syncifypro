@@ -22,8 +22,10 @@ export default function App() {
             its own page (/app/export, /app/import) with a "SyncifyPro > …"
             breadcrumb, so they aren't separate nav items. */}
         <s-link href="/app" rel="home">Home</s-link>
+        <s-link href="/app/jobs">Activity</s-link>
+        <s-link href="/app/scheduler">Schedules</s-link>
+        <s-link href="/app/servers">Servers</s-link>
         <s-link href="/app/migrations">Migrations</s-link>
-        <s-link href="/app/scheduler">Scheduler</s-link>
         <s-link href="/app/settings">Settings</s-link>
       </s-app-nav>
       <Outlet />

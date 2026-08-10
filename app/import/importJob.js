@@ -7,20 +7,24 @@
 
 import { parseCSV } from "./parsers/csv.js";
 import { parseXLSX } from "./parsers/xlsx.js";
+import { unzip } from "./parsers/unzip.js";
 import { normalizeHeaders, classifyColumns, reverseHeaderMap } from "./headers.js";
 import { detectEntity, entityFromSheetName } from "./detect.js";
+import { isEntityBlocked } from "../export/fieldLists.js";
 import { summarizeIntent, classifyRecord, identityKeys } from "./intent.js";
 import { groupRecords, topRow } from "./assemble.js";
 import { validateProductRows } from "./validators/products.js";
 import { validateOrderRows } from "./validators/orders.js";
 import { validateCustomerRows } from "./validators/customers.js";
 import { validateRedirectRows } from "./validators/redirects.js";
+import { validateGiftCardRows } from "./validators/giftCards.js";
 import { validateCollectionRows } from "./validators/collections.js";
 import { validateDiscountRows } from "./validators/discounts.js";
 import { upsertProducts } from "./writers/upsertProducts.js";
 import { upsertOrders } from "./writers/upsertOrders.js";
 import { upsertCustomers } from "./writers/upsertCustomers.js";
 import { upsertRedirects } from "./writers/upsertRedirects.js";
+import { upsertGiftCards } from "./writers/upsertGiftCards.js";
 import { upsertCollections } from "./writers/upsertCollections.js";
 import { upsertDiscounts } from "./writers/upsertDiscounts.js";
 
@@ -34,6 +38,24 @@ const SHEET_PARSERS = {
   csv:   (buf) => [{ name: null, rows: parseCSV(buf) }],
   xlsx:  (buf) => parseXLSX(buf),
   excel: (buf) => parseXLSX(buf),
+  // A ZIP of CSVs and/or Excel workbooks (what the multi-entity csv export —
+  // or a bundled folder import — produces): each .csv entry becomes a named
+  // sheet and each .xlsx entry contributes its own sheets, so the zip imports
+  // like one multi-sheet workbook. Entity detection stays header-based.
+  zip:   (buf) => {
+    const sheets = [];
+    for (const [name, data] of unzip(buf).entries()) {
+      if (!data.length) continue;
+      const base = name.replace(/^.*\//, "");
+      if (/\.csv$/i.test(base)) {
+        sheets.push({ name: base.replace(/\.csv$/i, ""), rows: parseCSV(data) });
+      } else if (/\.xlsx$/i.test(base)) {
+        for (const s of parseXLSX(data)) sheets.push(s);
+      }
+    }
+    if (!sheets.length) throw new Error("The ZIP contains no .csv or .xlsx files to import.");
+    return sheets;
+  },
   // xml:  (buf) => …,
   // json: (buf) => …,
 };
@@ -57,6 +79,7 @@ const VALIDATORS = {
   orders:      validateOrderRows,
   customers:   validateCustomerRows,
   redirects:   validateRedirectRows,
+  gift_cards:  validateGiftCardRows,
   collections: validateCollectionRows,
   discounts:   validateDiscountRows,
 };
@@ -66,6 +89,7 @@ const WRITERS = {
   orders:      upsertOrders,
   customers:   upsertCustomers,
   redirects:   upsertRedirects,
+  gift_cards:  upsertGiftCards,
   collections: upsertCollections,
   discounts:   upsertDiscounts,
 };
@@ -133,8 +157,9 @@ export function analyzeSheet({ rawRows, name = null, entity = "auto", include = 
     };
   }
 
-  // Sheet Permissions (Settings): a blocked entity can't be imported.
-  if (blockedEntities.includes(resolvedEntity)) {
+  // Sheet Permissions (Settings): a blocked entity can't be imported —
+  // including via a parent permission (blocked "content" gates articles etc.).
+  if (isEntityBlocked(resolvedEntity, blockedEntities)) {
     return {
       ok: false, included: true, name, entity: resolvedEntity, detection,
       reason: `Importing "${capitalizeEntity(resolvedEntity)}" is disabled in Sheet Permissions (Settings).`,
@@ -427,6 +452,13 @@ export async function runImportForJob({ admin, shop, jobId, plan = null, options
     const sheetResults = [];
 
     for (const s of sheets) {
+      // Bail between sheets when the user pressed Cancel. Rows already
+      // written stay written (imports aren't transactional across sheets).
+      const { isImportCancelRequested, markImportCancelled } = await import("../db/bulkImportJob.server.js");
+      if (await isImportCancelRequested(jobId)) {
+        await markImportCancelled({ id: jobId });
+        return;
+      }
       if (!s.ok) { sheetResults.push(s); continue; }
       const res = await applyImport({
         validRows: s.validRows,

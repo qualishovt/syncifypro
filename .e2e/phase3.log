@@ -1,0 +1,6 @@
+PASS  smoke: export products csv — 117 data rows
+PASS  smoke: import product (create) — created=1
+PASS  smoke: import product (DELETE) — verified gone
+PASS  store cleanliness (no e2e leftovers) — clean
+
+=== 4/4 passed ===

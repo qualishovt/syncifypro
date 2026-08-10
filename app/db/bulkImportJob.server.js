@@ -45,13 +45,20 @@ export async function markImportRunning({ id, progressTotal }) {
   return db.bulkImportJob.update({ where: { id }, data });
 }
 
-/** Bump the progress counter (records written so far). */
+/**
+ * Bump the progress counter (records written so far). Monotonic — progress
+ * writes are fired without awaiting, so a stale, lower value must never
+ * overwrite a newer, higher one (the bar would jump backwards).
+ */
 export async function updateImportProgress({ id, progressCurrent, progressTotal }) {
   const data = {};
   if (progressCurrent != null) data.progressCurrent = progressCurrent;
   if (progressTotal != null) data.progressTotal = progressTotal;
   if (Object.keys(data).length === 0) return null;
-  return db.bulkImportJob.update({ where: { id }, data });
+  const where = progressCurrent != null
+    ? { id, OR: [{ progressCurrent: null }, { progressCurrent: { lt: progressCurrent } }] }
+    : { id };
+  return db.bulkImportJob.updateMany({ where, data });
 }
 
 /** Mark a job complete with outcome counts and the results file. */
@@ -71,6 +78,28 @@ export async function markImportComplete({
 }
 
 /** Mark a job failed with an error message. */
+/** Ask a running import to stop. The worker checks between sheets and bails. */
+export async function requestImportCancel(shop, id) {
+  const res = await db.bulkImportJob.updateMany({
+    where: { id, shop, status: { in: ["pending", "running"] } },
+    data: { cancelRequested: true },
+  });
+  return res.count > 0;
+}
+
+/** True when the job's Cancel button was pressed (workers poll this). */
+export async function isImportCancelRequested(id) {
+  const job = await db.bulkImportJob.findUnique({ where: { id }, select: { cancelRequested: true } });
+  return Boolean(job?.cancelRequested);
+}
+
+export async function markImportCancelled({ id }) {
+  return db.bulkImportJob.update({
+    where: { id },
+    data: { status: "cancelled", errorMessage: "Cancelled by user", completedAt: new Date() },
+  });
+}
+
 export async function markImportFailed({ id, errorMessage }) {
   return db.bulkImportJob.update({
     where: { id },

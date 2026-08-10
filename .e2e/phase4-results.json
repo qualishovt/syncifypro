@@ -1,0 +1,67 @@
+[
+ {
+  "name": "export inventory",
+  "ok": true,
+  "detail": "20 cols, 90 rows"
+ },
+ {
+  "name": "export product_media",
+  "ok": true,
+  "detail": "12 cols, 81 rows"
+ },
+ {
+  "name": "export segments",
+  "ok": true,
+  "detail": "5 cols, 7 rows"
+ },
+ {
+  "name": "export markets",
+  "ok": true,
+  "detail": "4 cols, 2 rows"
+ },
+ {
+  "name": "export delivery_profiles",
+  "ok": true,
+  "detail": "7 cols, 1 rows"
+ },
+ {
+  "name": "export selling_plans",
+  "ok": true,
+  "detail": "20 cols, 0 rows"
+ },
+ {
+  "name": "export store_credit",
+  "ok": true,
+  "detail": "6 cols, 0 rows"
+ },
+ {
+  "name": "export metafields",
+  "ok": true,
+  "detail": "9 cols, 2 rows"
+ },
+ {
+  "name": "products as Shopify CSV",
+  "ok": true,
+  "detail": "Shopify layout: 36 columns"
+ },
+ {
+  "name": "customers as Shopify CSV",
+  "ok": true,
+  "detail": "Shopify customer layout"
+ },
+ {
+  "name": "products split into 25-row parts",
+  "ok": true,
+  "detail": "5 parts: products-part-01.csv, products-part-02.csv, products-part-03.csv…"
+ },
+ {
+  "name": "sub-hourly cadence math",
+  "ok": true,
+  "detail": "15m→10:15, 30m→10:30, rollover→11:00"
+ },
+ {
+  "name": "content-hash detection",
+  "ok": true,
+  "detail": "unchanged skipped=true, overwritten re-imports=true"
+ }
+]

@@ -13,7 +13,7 @@ const SHOP_QUERY = `#graphql
       id name email contactEmail myshopifyDomain
       url currencyCode ianaTimezone weightUnit
       primaryDomain { host url }
-      shopAddress { address1 address2 city province provinceCode zip country countryCodeV2 phone }
+      billingAddress { address1 address2 city province provinceCode zip country countryCodeV2 phone }
       plan { publicDisplayName partnerDevelopment shopifyPlus }
       createdAt updatedAt
     }

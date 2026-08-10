@@ -44,7 +44,9 @@ model BulkImportJob {
   entity          String
   format          String
   status          String    @default("pending")
-  // pending | running | complete | failed
+  // pending | running | complete | failed | cancelled
+  // Set by the Cancel button; the worker checks it between sheets and stops.
+  cancelRequested Boolean   @default(false)
   // Original uploaded filename (for display + results naming).
   filename        String?
   // R2 key of the staged upload the worker downloads to do the import.
@@ -83,6 +85,9 @@ model BulkExportJob {
   entity          String
   format          String
   status          String    @default("pending")
+  // pending | running | complete | failed | cancelled
+  // Set by the Cancel button; the worker checks it between entities and stops.
+  cancelRequested Boolean   @default(false)
   bulkOperationId String?
   // Legacy single-entity column selection; multi-entity jobs use `spec`.
   fields          String?
@@ -114,7 +119,7 @@ model AppSettings {
   // row + its history/number are kept). 0 = never delete.
   retentionDays Int      @default(7)
   // Defaults pre-selected on the Export/Import pages.
-  defaultExportFormat String @default("csv")   // csv | excel | xml | json
+  defaultExportFormat String @default("excel") // excel | csv | xml | json
   defaultImportMode   String @default("normal") // normal | updateOnly | createOnly | noDelete | dryRun
   // IANA time zone used to DISPLAY job/schedule timestamps (cadence math stays UTC).
   timezone      String   @default("UTC")
@@ -145,18 +150,40 @@ model Schedule {
   minute      Int       @default(0)   // 0-59
   weekday     Int?      // 0=Sun..6=Sat (weekly)
   monthday    Int?      // 1-31 (monthly)
+  // Inline "Schedule on / Repeat every" (Matrixify-style): a deferred first
+  // run, an interval cadence that overrides `frequency`, and a run limit.
+  startAt       DateTime?
+  intervalCount Int?
+  intervalUnit  String?   // minutes | hours | days | weeks | months
+  remainingRuns Int?      // null = until cancelled; reaching 0 disables
   // What to run.
   entity      String?   // export: comma-list of entities; import: detected entity (display)
   format      String    @default("csv")
   // Export: full spec JSON [{entity,filters,fields,advancedFilters}] from a saved
   // preset. When set it drives the run (filters/columns); else `entity` is used.
   spec        String?
-  // Import source — a schedule-owned R2 copy, re-imported each run (not touched
-  // by file-retention cleanup, which only clears job files).
+  // Import source. Either a remote URL fetched FRESH on every run (https/ftp/
+  // ftps/sftp/s3/Drive, credentials via saved ImportServers) …
+  sourceUrl   String?
+  // When sourceUrl is a FOLDER: skip files this schedule already imported
+  // (tracked in importedFiles, a JSON array of filenames).
+  onlyNewFiles  Boolean @default(true)
+  importedFiles String?
+  // … or a legacy schedule-owned R2 snapshot, re-imported as-is each run (not
+  // touched by file-retention cleanup, which only clears job files).
   sourceR2Key String?
   filename    String?
   plan        String?   // import per-sheet plan JSON [{entity,include,filters,columns}]
-  options     String?   // import options JSON ({mode}) — update-only/no-delete/etc.
+  // Options JSON. Import: ({mode}) — update-only/no-delete/etc. Export: the
+  // Advanced-section options snapshotted from the preset (zip, formatting, …).
+  options     String?
+  // Display timezone for the schedule (cadence math stays UTC).
+  timezone    String    @default("UTC")
+  // Delivery destinations JSON: { email, ftp, gdrive, gsheets, s3 } each
+  // { enabled, ...config }. Secrets inside are encrypted (crypto.server.js).
+  destinations String?
+  // Export schedules: split the run into files of N records (null = one file).
+  splitRows    Int?
   lastRunAt   DateTime?
   nextRunAt   DateTime?
   createdAt   DateTime  @default(now())
@@ -174,6 +201,8 @@ model ExportPreset {
   format    String   @default("csv")
   spec      String   // JSON: [{ entity, filters, fields, advancedFilters }]
   state     String?  // JSON: the export UI's entityState, for restoring the form
+  splitRows Int?     // split into files of N records (null = one file)
+  options   String?  // JSON: the Advanced-section options (filename, zip, formatting, csv …)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -220,4 +249,52 @@ model MigrationOAuthState {
   codeVerifier String
   redirectUri  String
   createdAt    DateTime @default(now())
+}
+
+// A saved remote server for "Import from URL" (FTP/FTPS/SFTP credentials or
+// S3 keys), matched to a typed URL by protocol + host. Backs the "+" (Add a
+// new server) button on the home Import card.
+model ImportServer {
+  id        String   @id @default(cuid())
+  shop      String
+  label     String
+  protocol  String   // ftp | ftps | sftp | s3
+  host      String   // ftp/sftp: hostname; s3: bucket name
+  port      Int?
+  username  String?  // s3: access key ID
+  password  String?  // s3: secret access key
+  region    String?  // s3 only
+  createdAt DateTime @default(now())
+
+  @@unique([shop, protocol, host, username])
+  @@index([shop])
+}
+
+// One row per schedule run (manual or cron) — backs the Scheduler's
+// "Schedule history" tab. Best-effort: runner failures to log are swallowed.
+model ScheduleRun {
+  id           String   @id @default(cuid())
+  shop         String
+  scheduleId   String
+  scheduleName String   @default("")
+  task         String   @default("") // what ran, e.g. "Export Products as CSV"
+  status       String   @default("ok") // ok | error
+  rows         Int      @default(0)
+  delivery     String   @default("") // short per-destination result summary
+  message      String   @default("")
+  runAt        DateTime @default(now())
+
+  @@index([shop])
+  @@index([scheduleId])
+}
+
+// Google OAuth tokens for Drive/Sheets schedule delivery (one per shop).
+model GoogleConnection {
+  shop         String    @id
+  email        String    @default("")
+  accessToken  String    @default("")
+  refreshToken String    @default("")
+  expiryDate   DateTime?
+  scope        String    @default("")
+  updatedAt    DateTime  @updatedAt
 }

@@ -1,0 +1,47 @@
+[
+ {
+  "name": "retest export discounts csv",
+  "ok": true,
+  "detail": "21-column header, 0 data rows"
+ },
+ {
+  "name": "retest export content csv",
+  "ok": true,
+  "detail": "18-column header, 0 data rows"
+ },
+ {
+  "name": "retest export articles csv",
+  "ok": true,
+  "detail": "17-column header, 0 data rows"
+ },
+ {
+  "name": "retest export gift_cards csv",
+  "ok": true,
+  "detail": "14-column header, 0 data rows"
+ },
+ {
+  "name": "retest export shop csv",
+  "ok": true,
+  "detail": "24-column header, 1 data rows"
+ },
+ {
+  "name": "retest export payouts csv",
+  "ok": true,
+  "detail": "15-column header, 0 data rows"
+ },
+ {
+  "name": "retest export companies csv",
+  "ok": true,
+  "detail": "36-column header, 0 data rows"
+ },
+ {
+  "name": "retest export inventory_transfers csv",
+  "ok": true,
+  "detail": "7-column header, 0 data rows"
+ },
+ {
+  "name": "advanced filter (title contains jseh)",
+  "ok": false,
+  "detail": "not filtered: 117"
+ }
+]

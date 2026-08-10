@@ -1,0 +1,22 @@
+[
+ {
+  "name": "smoke: export products csv",
+  "ok": true,
+  "detail": "117 data rows"
+ },
+ {
+  "name": "smoke: import product (create)",
+  "ok": true,
+  "detail": "created=1"
+ },
+ {
+  "name": "smoke: import product (DELETE)",
+  "ok": true,
+  "detail": "verified gone"
+ },
+ {
+  "name": "store cleanliness (no e2e leftovers)",
+  "ok": true,
+  "detail": "clean"
+ }
+]

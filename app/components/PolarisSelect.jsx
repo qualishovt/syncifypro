@@ -10,7 +10,7 @@
 import { useEffect, useRef } from "react";
 
 /* eslint-disable react/prop-types */
-export default function PolarisSelect({ value, onChange, label, disabled, children }) {
+export default function PolarisSelect({ value, onChange, label, disabled, placeholder, labelAccessibilityVisibility, children }) {
   const ref = useRef(null);
   const cb = useRef(onChange);
   cb.current = onChange;
@@ -32,7 +32,14 @@ export default function PolarisSelect({ value, onChange, label, disabled, childr
   }, [value, children]);
 
   return (
-    <s-select ref={ref} label={label} value={value} disabled={disabled ? true : undefined}>
+    <s-select
+      ref={ref}
+      label={label}
+      value={value}
+      disabled={disabled ? true : undefined}
+      {...(placeholder ? { placeholder } : {})}
+      {...(labelAccessibilityVisibility ? { labelAccessibilityVisibility } : {})}
+    >
       {children}
     </s-select>
   );

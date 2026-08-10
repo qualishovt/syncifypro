@@ -1,0 +1,15 @@
+PASS  export inventory — 20 cols, 90 rows
+PASS  export product_media — 12 cols, 81 rows
+PASS  export segments — 5 cols, 7 rows
+PASS  export markets — 4 cols, 2 rows
+PASS  export delivery_profiles — 7 cols, 1 rows
+PASS  export selling_plans — 20 cols, 0 rows
+PASS  export store_credit — 6 cols, 0 rows
+PASS  export metafields — 9 cols, 2 rows
+PASS  products as Shopify CSV — Shopify layout: 36 columns
+PASS  customers as Shopify CSV — Shopify customer layout
+PASS  products split into 25-row parts — 5 parts: products-part-01.csv, products-part-02.csv, products-part-03.csv…
+PASS  sub-hourly cadence math — 15m→10:15, 30m→10:30, rollover→11:00
+PASS  content-hash detection — unchanged skipped=true, overwritten re-imports=true
+
+=== 13/13 passed ===

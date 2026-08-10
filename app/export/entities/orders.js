@@ -14,7 +14,29 @@ import { buildOrderRows } from "../normalizer.js";
 // limit. Smaller pages = more requests, but no truncated data.
 const ORDERS_PAGE_SIZE = 10;
 
-const ORDERS_QUERY = `#graphql
+// staffMember needs read_users (restricted) and paymentTerms needs
+// read_payment_terms — both are included only when the shop has granted the
+// scope, so orders keep exporting (with those columns blank) either way.
+const OPTIONAL_FIELDS = {
+  read_users: "staffMember { id }",
+  read_payment_terms:
+    "paymentTerms { paymentTermsType overdue paymentSchedules(first: 1) { nodes { issuedAt dueAt completedAt } } }",
+};
+
+async function grantedScopes(admin) {
+  try {
+    const res = await admin.graphql(
+      `#graphql
+      query GetAccessScopes { currentAppInstallation { accessScopes { handle } } }`,
+    );
+    const { data } = await res.json();
+    return new Set((data?.currentAppInstallation?.accessScopes ?? []).map((s) => s.handle));
+  } catch {
+    return new Set();
+  }
+}
+
+const buildOrdersQuery = (scopes) => `#graphql
   query GetOrders($first: Int!, $after: String, $query: String) {
     orders(first: $first, after: $after, query: $query) {
       pageInfo {
@@ -29,27 +51,36 @@ const ORDERS_QUERY = `#graphql
         taxesIncluded test confirmed sourceName statusPageUrl
         clientIp sourceIdentifier confirmationNumber
         currentSubtotalLineItemsQuantity totalWeight
-        totalPriceSet { shopMoney { amount currencyCode } }
-        subtotalPriceSet { shopMoney { amount } }
-        totalTaxSet { shopMoney { amount } }
-        totalShippingPriceSet { shopMoney { amount } }
-        totalDiscountsSet { shopMoney { amount } }
+        poNumber registeredSourceUrl
+        physicalLocation { name }
+        ${scopes.has("read_users") ? OPTIONAL_FIELDS.read_users : ""}
+        customAttributes { key value }
+        ${scopes.has("read_payment_terms") ? OPTIONAL_FIELDS.read_payment_terms : ""}
+        totalPriceSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } }
+        subtotalPriceSet { shopMoney { amount } presentmentMoney { amount } }
+        currentSubtotalPriceSet { shopMoney { amount } }
+        totalTaxSet { shopMoney { amount } presentmentMoney { amount } }
+        totalShippingPriceSet { shopMoney { amount } presentmentMoney { amount } }
+        currentShippingPriceSet { shopMoney { amount } }
+        totalDiscountsSet { shopMoney { amount } presentmentMoney { amount } }
         currentTotalPriceSet { shopMoney { amount } }
-        totalRefundedSet { shopMoney { amount } }
+        totalRefundedSet { shopMoney { amount } presentmentMoney { amount } }
         currentTotalDutiesSet { shopMoney { amount } }
-        originalTotalDutiesSet { shopMoney { amount } }
+        originalTotalDutiesSet { shopMoney { amount } presentmentMoney { amount } }
         currentTotalAdditionalFeesSet { shopMoney { amount } }
-        originalTotalAdditionalFeesSet { shopMoney { amount } }
+        originalTotalAdditionalFeesSet { shopMoney { amount } presentmentMoney { amount } }
         totalReceivedSet { shopMoney { amount } }
         netPaymentSet { shopMoney { amount } }
         totalCapturableSet { shopMoney { amount } }
-        taxLines { title rate ratePercentage channelLiable priceSet { shopMoney { amount } } }
-        risk { recommendation assessments { riskLevel facts { description sentiment } } }
+        totalOutstandingSet { shopMoney { amount } presentmentMoney { amount } }
+        taxLines { title rate ratePercentage channelLiable priceSet { shopMoney { amount } presentmentMoney { amount } } }
+        risk { recommendation assessments { riskLevel provider { title } facts { description sentiment } } }
         customerJourneySummary { lastVisit { landingPage referrerUrl source sourceType utmParameters { source medium campaign term content } } }
-        purchasingEntity { __typename ... on PurchasingCompany { company { id name } location { id name } } }
+        purchasingEntity { __typename ... on PurchasingCompany { company { id name externalId } location { id name externalId } } }
         shippingLine { title code source originalPriceSet { shopMoney { amount } } taxLines { title rate priceSet { shopMoney { amount } } } }
         transactions(first: 50) {
           id kind status gateway processedAt accountNumber paymentId errorCode test
+          authorizationCode
           amountSet { shopMoney { amount currencyCode } }
           parentTransaction { id }
         }
@@ -82,10 +113,12 @@ const ORDERS_QUERY = `#graphql
           nodes {
             id title name variantTitle sku vendor quantity currentQuantity unfulfilledQuantity
             requiresShipping taxable isGiftCard fulfillmentStatus
-            originalUnitPriceSet { shopMoney { amount } }
+            originalUnitPriceSet { shopMoney { amount } presentmentMoney { amount currencyCode } }
+            originalTotalSet { shopMoney { amount } }
             discountedUnitPriceSet { shopMoney { amount } }
-            discountedTotalSet { shopMoney { amount } }
-            totalDiscountSet { shopMoney { amount } }
+            discountedTotalSet { shopMoney { amount } presentmentMoney { amount } }
+            totalDiscountSet { shopMoney { amount } presentmentMoney { amount } }
+            discountAllocations { allocatedAmountSet { shopMoney { amount } presentmentMoney { amount } } }
             taxLines { title rate ratePercentage channelLiable priceSet { shopMoney { amount } } }
             customAttributes { key value }
             variant {
@@ -117,8 +150,10 @@ export async function extractOrders(admin, { query = "status:any", onProgress } 
   let hasNextPage = true;
   let processed = 0;
 
+  const query_ = buildOrdersQuery(await grantedScopes(admin));
+
   while (hasNextPage) {
-    const response = await admin.graphql(ORDERS_QUERY, {
+    const response = await admin.graphql(query_, {
       variables: { first: ORDERS_PAGE_SIZE, after: cursor, query },
     });
 

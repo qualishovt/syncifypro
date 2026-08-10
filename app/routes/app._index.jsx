@@ -11,9 +11,13 @@
 
 /* global Buffer */
 import { useRef, useState } from "react";
-import { useLoaderData, useFetcher, useNavigate, useNavigation } from "react-router";
+import { useLoaderData, useFetcher, useNavigate, useNavigation, PrefetchPageLinks } from "react-router";
 import { data, redirect } from "react-router";
 import { authenticate } from "../shopify.server.js";
+import { parseImportUrl, buildRemoteUrl } from "../import/urlSource.js";
+import { ExportIcon, ImportIcon } from "../components/JobKindIcons.jsx";
+import { useElementWidth, widthProps, PickerRow } from "../components/PickerPopover.jsx";
+import PolarisTextField from "../components/PolarisTextField.jsx";
 
 // ─── Loader (combined recent activity) ─────────────────────────────────────────
 
@@ -38,7 +42,11 @@ export async function loader({ request }) {
   const recentActivity = await Promise.all(merged.map((row) => attachDownload(row, signDownloadUrl)));
   const { timezone } = await getAppSettings(session.shop);
 
-  return { recentActivity, timezone };
+  // Saved remote servers for "Import from URL" (credentials stay server-side).
+  const { listImportServers, serializeImportServer } = await import("../db/importServer.server.js");
+  const servers = (await listImportServers(session.shop)).map(serializeImportServer);
+
+  return { recentActivity, timezone, servers };
 }
 
 // ─── Action (stage the uploaded file, then open the New Import page) ────────────
@@ -60,26 +68,63 @@ export async function action({ request }) {
     return data({ error: "Nothing to repeat." }, { status: 400 });
   }
 
+  // Import from a remote URL: download server-side, then stage exactly like an
+  // uploaded file so the New Import page can't tell the difference.
+  if (formData.get("intent") === "importUrl") {
+    const url = String(formData.get("url") || "").trim();
+    try {
+      const { fetchImportSources } = await import("../import/urlSource.server.js");
+      const files = await fetchImportSources({ shop, url });
+
+      // Single file (any file URL, and every https URL) — stage it directly.
+      if (files.length === 1) {
+        const { buffer, filename, format } = files[0];
+        const mimeType = format === "csv" ? "text/csv" : format === "zip" ? "application/zip" : XLSX_MIME;
+        return stageAndRedirect({ shop, buffer, filename, mimeType });
+      }
+
+      // A folder with several files — bundle them into one ZIP so the normal
+      // import flow shows every file as a sheet in a single job. Nested zips
+      // can't be re-bundled; they only work as single-file imports.
+      const { zipParts } = await import("../export/formats/zip.js");
+      const bundlable = files.filter((f) => f.format !== "zip");
+      if (!bundlable.length) {
+        return data({ error: "That folder only contains ZIP archives — point the URL at one of them directly." }, { status: 400 });
+      }
+      const buffer = zipParts(bundlable.map((f) => ({ name: f.filename, data: f.buffer })));
+      const stamp = new Date().toISOString().slice(0, 10);
+      return stageAndRedirect({ shop, buffer, filename: `folder-import-${stamp}.zip`, mimeType: "application/zip" });
+    } catch (err) {
+      return data({ error: err.message }, { status: 400 });
+    }
+  }
+
   const file = formData.get("file");
   if (!file || typeof file === "string") {
     return data({ error: "No file uploaded." }, { status: 400 });
   }
-  if (!/\.(csv|xlsx|xls)$/i.test(file.name)) {
-    return data({ error: "Unsupported file type. Upload a .csv or .xlsx file." }, { status: 400 });
+  if (!/\.(csv|xlsx|xls|zip)$/i.test(file.name)) {
+    return data({ error: "Unsupported file type. Upload a .csv, .xlsx or .zip file." }, { status: 400 });
   }
 
-  const { putToR2 } = await import("../export/delivery/r2.js");
   const buffer = Buffer.from(await file.arrayBuffer());
+  const mimeType = /\.csv$/i.test(file.name) ? "text/csv"
+    : /\.zip$/i.test(file.name) ? "application/zip"
+    : XLSX_MIME;
+  return stageAndRedirect({ shop: session.shop, buffer, filename: file.name, mimeType });
+}
+
+/**
+ * Stage an import file to R2 and open the New Import page on it — shared by
+ * the upload dropzone and the Import-from-URL path.
+ */
+async function stageAndRedirect({ shop, buffer, filename, mimeType }) {
+  const { putToR2 } = await import("../export/delivery/r2.js");
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const safeName = String(file.name).replace(/[^\w.-]+/g, "_");
-  const key = `imports/${session.shop}/${stamp}-${safeName}`;
-  const mimeType = /\.csv$/i.test(file.name) ? "text/csv" : XLSX_MIME;
-
+  const safeName = String(filename).replace(/[^\w.-]+/g, "_");
+  const key = `imports/${shop}/${stamp}-${safeName}`;
   await putToR2({ buffer, key, mimeType });
-
-  // Hand off to the New Import page, which analyzes the staged file and shows
-  // the per-sheet options.
-  return redirect(`/app/import?src=${encodeURIComponent(key)}&name=${encodeURIComponent(file.name)}`);
+  return redirect(`/app/import?src=${encodeURIComponent(key)}&name=${encodeURIComponent(filename)}`);
 }
 
 // Re-run a past export from its stored spec (entities + filters + columns).
@@ -90,15 +135,15 @@ function parseJson(raw) {
 }
 
 async function repeatExport(admin, shop, jobId) {
-  const { getJob } = await import("../db/bulkExportJob.server.js");
+  const { getJob, parseJobSpec } = await import("../db/bulkExportJob.server.js");
   const { startExport } = await import("../export/exportJob.js");
   const job = await getJob(jobId);
   if (!job || job.shop !== shop) return data({ error: "Export not found." }, { status: 404 });
-  const specs = job.spec
-    ? JSON.parse(job.spec)
-    : [{ entity: job.entity, filters: {}, fields: job.fields ? job.fields.split(",") : undefined }];
-  const res = await startExport({ admin, shop, specs, format: job.format });
-  return redirect(`/app/export?jobId=${res.jobId}`);
+  const parsed = parseJobSpec(job.spec);
+  const specs = parsed.specs
+    ?? [{ entity: job.entity, filters: {}, fields: job.fields ? job.fields.split(",") : undefined }];
+  const res = await startExport({ admin, shop, specs, format: job.format, options: parsed.options, splitRows: parsed.splitRows });
+  return redirect(`/app/run/${res.jobId}`);
 }
 
 // Re-run a past import from its still-staged uploaded file, reusing the plan +
@@ -118,13 +163,13 @@ async function repeatImport(shop, jobId) {
     plan, options,
   });
   await enqueueImport({ jobId: newJob.id, shop, plan, options: options ?? {} });
-  return redirect(`/app/import?jobId=${newJob.id}`);
+  return redirect(`/app/run/${newJob.id}`);
 }
 
 const iso = (d) => (d ? new Date(d).toISOString() : null);
 const stripExt = (name) => String(name ?? "").replace(/\.[^.]+$/, "");
 // A Recent-activity row's "#" links to that job's page (progress / downloads).
-const jobHref = (j) => (j.type === "export" ? `/app/export?jobId=${j.id}` : `/app/import?jobId=${j.id}`);
+const jobHref = (j) => `/app/run/${j.id}`;
 
 function importMeta(j) {
   const base = (j.filename ? stripExt(j.filename) : titleCaseList(j.entity)) || "import";
@@ -181,13 +226,35 @@ async function attachDownload(row, sign) {
 // ─── UI ─────────────────────────────────────────────────────────────────────────
 
 export default function Home() {
-  const { recentActivity, timezone } = useLoaderData();
+  const { recentActivity, timezone, servers } = useLoaderData();
   const stageFetcher = useFetcher(); // stages the upload → redirects to /app/import
   const repeatFetcher = useFetcher(); // re-runs a past job → redirects to its page
+  const urlFetcher = useFetcher();    // downloads a remote URL → redirects to /app/import
   const navigate = useNavigate();
   const nav = useNavigation();
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef(null);
+
+  // ── Import from URL: type a URL, or pick a saved server to prefill one ────
+  const [serverId, setServerId] = useState("");
+  const [importUrl, setImportUrl] = useState("");
+  // Selecting a saved server writes its URL into the input; the user can
+  // append a path/file, or just import the whole root folder as-is.
+  // "— none —" (value "") deselects and empties the input to start over.
+  function pickServer(id) {
+    setServerId(id);
+    const s = servers.find((x) => x.id === id);
+    setImportUrl(s ? buildRemoteUrl(s, "") : "");
+  }
+  const urlValid = parseImportUrl(importUrl).ok;
+  const urlImporting = urlFetcher.state !== "idle";
+  // Server picker popover: spinner while navigating to Servers, popover
+  // matched to its trigger's width.
+  const [addingServer, setAddingServer] = useState(false);
+  const [serverTriggerRef, serverTriggerWidth] = useElementWidth();
+  function importFromUrl() {
+    if (urlValid && !urlImporting) urlFetcher.submit({ intent: "importUrl", url: importUrl.trim() }, { method: "post" });
+  }
 
   // The row currently being repeated (for a per-row spinner).
   const repeatingId = repeatFetcher.state !== "idle" ? repeatFetcher.formData?.get("jobId") : null;
@@ -262,7 +329,7 @@ export default function Home() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".csv,.xlsx,.xls"
+                accept=".csv,.xlsx,.xls,.zip"
                 onChange={(e) => stageFile(e.target.files?.[0] ?? null)}
                 onClick={(e) => e.stopPropagation()}
                 style={{ display: "none" }}
@@ -272,17 +339,119 @@ export default function Home() {
               </s-button>
               <s-text type="strong">or drop file here to upload</s-text>
               <s-text color="subdued">
-                Excel (.xlsx) or CSV. An Excel workbook can hold one sheet per entity
-                (Products, Customers, Orders…) — all imported in one job.
+                Excel (.xlsx), CSV, or a ZIP of CSVs. An Excel workbook holds one sheet per
+                entity (Products, Customers, Orders…) and a ZIP one CSV per entity — either
+                way, all imported in one job.
               </s-text>
             </div>
             {stageFetcher.data?.error && <s-banner tone="critical">{stageFetcher.data.error}</s-banner>}
+
+            {/* ── Import from URL: saved servers prefill the URL input; the "+"
+                opens the Servers page (prefetched, so the jump is instant). */}
+            <PrefetchPageLinks page="/app/servers" />
+            <s-grid gridTemplateColumns="auto 1fr auto" gap="small-200" alignItems="center">
+              {/* Popover server picker (same pattern as the run page's
+                  Deliver-to): Direct URL, Add a new server, saved servers. */}
+              <div ref={serverTriggerRef} style={{ minWidth: 180 }}>
+                <s-clickable
+                  command="--toggle"
+                  commandFor="home-server-popover"
+                  inlineSize="100%"
+                  borderWidth="base"
+                  borderStyle="solid"
+                  borderColor="strong"
+                  borderRadius="base"
+                  paddingInline="small-100"
+                  blockSize="32px"
+                  background="base"
+                >
+                  {(() => {
+                    const sel = servers.find((s) => s.id === serverId);
+                    return (
+                      <s-grid gridTemplateColumns="1fr auto" gap="small" alignItems="center">
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: ".4rem" }}>
+                          {!sel && <s-icon type="link" />}
+                          {sel ? `${sel.label} (${String(sel.protocol).toUpperCase()})` : "Direct URL"}
+                        </span>
+                        <s-icon type="select" />
+                      </s-grid>
+                    );
+                  })()}
+                </s-clickable>
+              </div>
+              <s-popover id="home-server-popover" {...widthProps(Math.max(serverTriggerWidth, 240))}>
+                <s-box padding="small-200">
+                  <s-stack direction="block" gap="small-300">
+                    <PickerRow
+                      icon={<s-icon type="link" />}
+                      label="Direct URL"
+                      selected={!serverId}
+                      onSelect={() => pickServer("")}
+                      popoverId="home-server-popover"
+                    />
+                    {/* Navigates — adding a server lives on its own page. */}
+                    <s-clickable
+                      onClick={() => { setAddingServer(true); navigate("/app/servers"); }}
+                      padding="small-200"
+                      borderRadius="base"
+                    >
+                      <s-grid gridTemplateColumns="auto 1fr" gap="small-200" alignItems="center">
+                        <span style={{ width: 20, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                          {addingServer
+                            ? <s-spinner size="small" accessibilityLabel="Opening Servers" />
+                            : <s-icon type="plus" />}
+                        </span>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: ".35rem" }}>
+                          Add a new server
+                          <s-icon type="external" />
+                        </span>
+                      </s-grid>
+                    </s-clickable>
+                    <s-text color="subdued">Saved servers</s-text>
+                    {servers.length === 0 && (
+                      <s-text color="subdued">No saved servers yet.</s-text>
+                    )}
+                    {servers.map((s) => (
+                      <PickerRow
+                        key={s.id}
+                        icon={<s-icon type="database" />}
+                        label={`${s.label} (${String(s.protocol).toUpperCase()})`}
+                        selected={serverId === s.id}
+                        onSelect={() => pickServer(s.id)}
+                        popoverId="home-server-popover"
+                      />
+                    ))}
+                  </s-stack>
+                </s-box>
+              </s-popover>
+              <PolarisTextField
+                label="Import from URL"
+                labelAccessibilityVisibility="exclusive"
+                placeholder="https://, ftp://, ftps://, sftp://, s3:// or a Google Drive link"
+                value={importUrl}
+                onChange={setImportUrl}
+                onEnter={importFromUrl}
+                disabled={urlImporting}
+              />
+              <s-button
+                variant="primary"
+                disabled={!urlValid || urlImporting ? true : undefined}
+                loading={urlImporting ? true : undefined}
+                onClick={importFromUrl}
+              >
+                Import from URL
+              </s-button>
+            </s-grid>
+            {urlFetcher.data?.error && <s-banner tone="critical">{urlFetcher.data.error}</s-banner>}
           </s-stack>
         </s-section>
 
         {/* ── Recent activity: combined imports + exports ──────────── */}
         {recentActivity.length > 0 && (
           <s-section heading="Recent activity">
+            <s-stack direction="inline" justifyContent="end">
+              <s-link href="/app/jobs">View all activity</s-link>
+            </s-stack>
             <s-table>
               <s-table-header-row>
                 <s-table-header>#</s-table-header>
@@ -328,7 +497,8 @@ export default function Home() {
                           ? (
                             <span style={fileList}>
                               {j.files.map((f, i) => (
-                                <s-link key={i} href={f.url} target="_blank">{f.name}</s-link>
+                                // PDFs open in a viewer tab; other formats download in place.
+                                <s-link key={i} href={f.url} target={/\.pdf$/i.test(f.name) ? "_blank" : undefined}>{f.name}</s-link>
                               ))}
                             </span>
                           )
@@ -361,7 +531,8 @@ export default function Home() {
         .dz {
           display: flex; flex-direction: column; align-items: center; gap: .75rem;
           text-align: center; padding: 2.5rem 1.5rem;
-          border: 2px dashed #c9cccf; border-radius: 12px; background: #fafbfb;
+          /* 1px dash, like the admin's own media uploader on products/new. */
+          border: 1px dashed #c9cccf; border-radius: 8px; background: #fafbfb;
           cursor: pointer; transition: background .15s ease, border-color .15s ease;
         }
         .dz:hover, .dz.drag { background: #f1f2f3; border-color: #8c9196; }
@@ -375,28 +546,12 @@ export default function Home() {
 
 // Export = data leaving the store — green "out of a box" arrow (distinct shape
 // AND colour from Import, so the two are easy to tell apart even when small).
-// Polaris export icon, kept green via the success tone (s-icon can't take a
-// raw hex — #008060 is Shopify's success green).
-function ExportIcon() {
-  return <s-icon type="export" tone="success" />;
-}
-
-// Import = data coming into the store — blue download-into-tray arrow.
-function ImportIcon() {
-  return (
-    <svg viewBox="0 0 24 24" style={{ width: "1em", height: "1em" }} fill="none" stroke="#2c6ecb" strokeWidth="2"
-      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-      <polyline points="7 10 12 15 17 10" />
-      <line x1="12" y1="3" x2="12" y2="15" />
-    </svg>
-  );
-}
+// Export/Import glyphs shared with the run page — see components/JobKindIcons.
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
-const STATUS_TONE = { complete: "success", failed: "critical", running: "info", pending: "info" };
-const STATUS_LABEL = { complete: "Complete", failed: "Failed", running: "Running", pending: "Queued" };
+const STATUS_TONE = { complete: "success", failed: "critical", running: "info", pending: "info", cancelled: "warning" };
+const STATUS_LABEL = { complete: "Complete", failed: "Failed", running: "Running", pending: "Queued", cancelled: "Cancelled" };
 
 // Status label + tone. A *completed* import can still have per-record failures
 // (the job "finished" but records errored) — so reflect that instead of a plain

@@ -1,0 +1,18 @@
+PASS  import products csv (create) — created E2E Product 1785088085954 (DRAFT)
+PASS  import products csv (DELETE) — deleted + verified gone
+PASS  import multi-sheet xlsx (create both) — product + customer created and verified
+PASS  import multi-sheet xlsx (DELETE both) — both deleted
+PASS  import zip of csvs (redirect + collection) — redirect + collection created and verified
+FAIL  import zip of csvs (DELETE both) — deleted=0 failed=0
+PASS  import gift cards csv (create) — created gift card 531413762223, balance 1.0
+PASS  import gift cards csv (DELETE = deactivate) — deactivated + verified
+FAIL  import discounts csv (create) — created=0 failed=1
+FAIL  import discounts csv (DELETE) — deleted=0 failed=1
+PASS  import orders csv (dry run) — dry run finished (created=1, failed=0) — no store writes
+PASS  import with plan (row filter + column selection) — row filter worked; vendor=dataengine (column selection: vendor excluded)
+PASS  import plan cleanup (DELETE) — cleaned up
+
+=== 10/13 passed ===
+FAILED: import zip of csvs (DELETE both) — deleted=0 failed=0
+FAILED: import discounts csv (create) — created=0 failed=1
+FAILED: import discounts csv (DELETE) — deleted=0 failed=1

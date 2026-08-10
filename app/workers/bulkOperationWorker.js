@@ -62,7 +62,9 @@ const MIME_TYPES = {
 export async function processBulkOperation({ jobId, jsonlUrl, entity, format, shop, fields, admin }) {
   const mimeType  = MIME_TYPES[format] ?? "application/octet-stream";
   const timestamp = new Date().toISOString().slice(0, 19).replace("T", "-").replace(/:/g, "-");
-  const filename  = `${entity}-${timestamp}.${format}`;
+  // Capital first letter, matching the tracked-path file names.
+  const entityName = entity.charAt(0).toUpperCase() + entity.slice(1);
+  const filename  = `${entityName}-${timestamp}.${format}`;
   const r2Key     = `exports/${shop}/${filename}`;
 
   const reconcile = BULK_RECONCILE[entity];

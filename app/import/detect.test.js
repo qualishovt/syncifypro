@@ -30,9 +30,13 @@ test("detectEntity: customers file", () => {
   assert.equal(d.entity, "customers");
 });
 
-test("detectEntity: only generic columns → low confidence", () => {
+test("detectEntity: only generic columns → no detection at all", () => {
+  // ID/Command/Note appear on nearly every entity — matching ONLY those
+  // identifies nothing (a lone "Note" column must not become gift cards).
   const d = detectEntity(["ID", "Command"]);
-  assert.equal(d.confidence, "low");
+  assert.equal(d.entity, null);
+  assert.equal(d.confidence, "none");
+  assert.equal(detectEntity(["Note"]).entity, null);
 });
 
 test("detectEntity: empty header list → none", () => {

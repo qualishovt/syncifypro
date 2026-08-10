@@ -1,0 +1,45 @@
+PASS  export products csv — 117 data rows
+PASS  export orders csv — 23 data rows
+PASS  export customers csv — 23 data rows
+PASS  export collections csv — 6 data rows
+PASS  export smart_collections csv — 1 data rows
+PASS  export custom_collections csv — 5 data rows
+FAIL  export discounts csv — no file produced
+FAIL  export content csv — no file produced
+FAIL  export articles csv — no file produced
+PASS  export draft_orders csv — 10 data rows
+FAIL  export gift_cards csv — no file produced
+PASS  export redirects csv — 1 data rows
+FAIL  export shop csv — Field 'shopAddress' doesn't exist on type 'Shop'
+PASS  export files csv — 84 data rows
+FAIL  export payouts csv — no file produced
+PASS  export menus csv — 6 data rows
+FAIL  export companies csv — no file produced
+PASS  export locations csv — 1 data rows
+PASS  export catalogs csv — 2 data rows
+FAIL  export inventory_transfers csv — no file produced
+PASS  export activity csv — 55 data rows
+PASS  export metaobjects csv — 2 data rows
+PASS  export definitions csv — 4 data rows
+PASS  export translations csv — 450 data rows
+PASS  products xlsx — 1 sheet(s): Export(117)
+PASS  products json — 117 records
+PASS  products xml — 117 record tags
+PASS  products pdf — pdf, 198251 bytes
+PASS  products csv (baseline count) — 117 data rows
+PASS  products csv + status filter — filtered 111 vs total 117
+PASS  products csv + advanced filter (title contains test) — advanced-filtered to 117 rows (117 lines)
+PASS  products csv + column selection — columns: ID | Handle | Title | Vendor
+PASS  multi-entity xlsx workbook — 2 sheet(s): Products(117), Customers(23)
+PASS  multi-entity csv → zip — zip: products.csv, customers.csv
+PASS  multi-entity pdf (sections) — pdf, 235560 bytes
+
+=== 27/35 passed ===
+FAILED: export discounts csv — no file produced
+FAILED: export content csv — no file produced
+FAILED: export articles csv — no file produced
+FAILED: export gift_cards csv — no file produced
+FAILED: export shop csv — Field 'shopAddress' doesn't exist on type 'Shop'
+FAILED: export payouts csv — no file produced
+FAILED: export companies csv — no file produced
+FAILED: export inventory_transfers csv — no file produced

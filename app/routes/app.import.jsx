@@ -18,6 +18,8 @@ import { data, redirect } from "react-router";
 import { authenticate } from "../shopify.server.js";
 import { analyzeWorkbook } from "../import/importJob.js";
 import PolarisSelect from "../components/PolarisSelect.jsx";
+import PolarisCheckbox from "../components/PolarisCheckbox.jsx";
+import { PickerRow, widthProps } from "../components/PickerPopover.jsx";
 
 // ─── Loader ────────────────────────────────────────────────────────────────────
 
@@ -92,6 +94,54 @@ export async function action({ request }) {
   // Save / delete a named import preset (plan + mode). Handled before the
   // analyze/apply flow since these don't touch the staged file.
   const intent = formData.get("intent");
+  if (intent === "cancel") {
+    const { requestImportCancel } = await import("../db/bulkImportJob.server.js");
+    const ok = await requestImportCancel(session.shop, String(formData.get("jobId")));
+    return { cancelRequested: ok };
+  }
+
+  // "Failed rows only": rebuild a file containing just the rows that errored,
+  // with their error text, so the merchant can fix and re-import ONLY those.
+  if (intent === "failedRows") {
+    try {
+      const { getImportJob } = await import("../db/bulkImportJob.server.js");
+      const job = await getImportJob(String(formData.get("jobId")));
+      if (!job || job.shop !== session.shop || !job.resultR2Key) {
+        return data({ error: "That import's results file is no longer available." }, { status: 400 });
+      }
+      const { downloadFromR2, putToR2, signDownloadUrl } = await import("../export/delivery/r2.js");
+      const { parseXLSX } = await import("../import/parsers/xlsx.js");
+      const { toExcelWorkbook } = await import("../export/formats/excel.js");
+
+      // The results workbook holds one sheet per imported sheet, each row
+      // carrying "Import Result" / "Import Comment" columns.
+      const sheets = parseXLSX(await downloadFromR2(job.resultR2Key));
+      const failedSheets = [];
+      let count = 0;
+      for (const sheet of sheets) {
+        const failed = (sheet.rows ?? []).filter(
+          (r) => String(r["Import Result"] ?? "").toLowerCase() === "failed",
+        );
+        if (failed.length) {
+          failedSheets.push({ name: sheet.name, rows: failed, columns: Object.keys(failed[0]) });
+          count += failed.length;
+        }
+      }
+      if (!count) return data({ error: "This import had no failed rows." }, { status: 400 });
+
+      const base = (job.filename || "import").replace(/\.[^.]+$/, "");
+      const key = `imports/${session.shop}/failed/${job.id}.xlsx`;
+      await putToR2({
+        buffer: toExcelWorkbook(failedSheets),
+        key,
+        mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const { signedUrl } = await signDownloadUrl(key, `${base}-failed-rows.xlsx`);
+      return { failedRowsUrl: signedUrl, failedRowsCount: count };
+    } catch (err) {
+      return data({ error: err.message }, { status: 500 });
+    }
+  }
   if (intent === "savePreset" || intent === "deletePreset") {
     const preset = await import("../db/importPreset.server.js");
     try {
@@ -181,6 +231,7 @@ function formatFromName(name) {
   const ext = String(name).toLowerCase().split(".").pop();
   if (ext === "csv") return "csv";
   if (ext === "xlsx" || ext === "xls") return "xlsx";
+  if (ext === "zip") return "zip";
   return null;
 }
 
@@ -217,6 +268,8 @@ export default function ImportPage() {
   const fetcher = useFetcher();        // re-analyze / apply
   const pollFetcher = useFetcher();    // job status polling
   const presetFetcher = useFetcher();  // save / delete import presets
+  const cancelFetcher = useFetcher();  // asks a running import to stop
+  const failedFetcher = useFetcher();  // builds the failed-rows-only file
 
   const [plan, setPlan] = useState(null);       // per-sheet {entity, include}, by index
   const [importMode, setImportMode] = useState(defaultImportMode ?? "normal");
@@ -233,7 +286,7 @@ export default function ImportPage() {
   const error = d?.error || presetFetcher.data?.error;
 
   const job = pollFetcher.data?.job ?? initialJob ?? null;
-  const finished = job && (job.status === "complete" || job.status === "failed");
+  const finished = job && (job.status === "complete" || job.status === "failed" || job.status === "cancelled");
 
   // Initialise the plan once the first preview is available.
   useEffect(() => {
@@ -263,7 +316,7 @@ export default function ImportPage() {
 
   useEffect(() => {
     if (!pollingJobId) return;
-    if (job?.status === "complete" || job?.status === "failed") return;
+    if (job?.status === "complete" || job?.status === "failed" || job?.status === "cancelled") return;
     const interval = setInterval(() => {
       pollFetcher.load(`/app/import?jobId=${pollingJobId}`);
     }, 2000);
@@ -353,20 +406,122 @@ export default function ImportPage() {
                 <s-button href="/app">Start over</s-button>
               </div>
 
-              {/* Sheets */}
+              {/* Sheets review table — the export page's table pattern: tick
+                  a sheet to include it, map its entity inline; the ticked
+                  sheets get their configuration cards below. */}
+              <div style={sheetCard}>
+                <table style={reviewTable}>
+                  <thead>
+                    <tr>
+                      <th style={{ ...reviewTh, width: 28 }}></th>
+                      <th style={reviewTh}>Sheet</th>
+                      <th style={reviewTh}>Import as</th>
+                      <th style={{ ...reviewTh, textAlign: "right" }}>Rows</th>
+                      <th style={{ ...reviewTh, textAlign: "right" }}>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {preview.sheets.map((s, i) => {
+                      const p = plan?.[i] ?? { entity: "auto", include: true };
+                      const included = p.include && p.entity !== "ignore";
+                      return (
+                        <tr key={i}>
+                          <td style={reviewTd}>
+                            <PolarisCheckbox
+                              label={`Include ${s.name ?? "sheet"}`}
+                              labelAccessibilityVisibility="exclusive"
+                              checked={included}
+                              onChange={(checked) => updatePlan(i, {
+                                include: checked,
+                                ...(checked && p.entity === "ignore" ? { entity: "auto" } : {}),
+                              })}
+                              disabled={busy}
+                            />
+                          </td>
+                          <td style={{ ...reviewTd, fontWeight: 600, ...(included ? null : { color: "#8a8a8a" }) }}>
+                            {s.name ?? "Sheet"}
+                          </td>
+                          <td style={reviewTd}>
+                            {/* Popover picker (same pattern as the export
+                                page's Format field) instead of a native select. */}
+                            <div style={{ maxWidth: 230 }}>
+                              <s-clickable
+                                command="--toggle"
+                                commandFor={`import-as-${i}`}
+                                disabled={busy ? true : undefined}
+                                inlineSize="100%"
+                                borderWidth="base"
+                                borderStyle="solid"
+                                borderColor="strong"
+                                borderRadius="base"
+                                paddingInline="small-100"
+                                blockSize="32px"
+                                background="base"
+                              >
+                                <s-grid gridTemplateColumns="1fr auto" gap="small" alignItems="center">
+                                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                    {ENTITY_OPTIONS.find((o) => o.value === p.entity)?.label ?? p.entity}
+                                  </span>
+                                  <s-icon type="select" />
+                                </s-grid>
+                              </s-clickable>
+                              <s-popover id={`import-as-${i}`} {...widthProps(230)}>
+                                <s-box padding="small-200">
+                                  <s-stack direction="block" gap="small-300">
+                                    {ENTITY_OPTIONS.map((o) => (
+                                      <PickerRow
+                                        key={o.value}
+                                        label={o.label}
+                                        selected={p.entity === o.value}
+                                        onSelect={() => updatePlan(i, { entity: o.value, include: o.value !== "ignore" })}
+                                        popoverId={`import-as-${i}`}
+                                      />
+                                    ))}
+                                  </s-stack>
+                                </s-box>
+                              </s-popover>
+                            </div>
+                          </td>
+                          <td style={{ ...reviewTd, textAlign: "right" }}>
+                            {s.ok ? (s.parsed ?? 0).toLocaleString() : "—"}
+                          </td>
+                          <td style={reviewTd}>
+                            {/* Flex, not text-align — the badge is a custom
+                                element and must be pushed right explicitly. */}
+                            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                              {!included
+                                ? <s-badge>Skipped</s-badge>
+                                : s.ok
+                                  ? <s-badge tone="success">Ready</s-badge>
+                                  : <s-badge tone="warning">Not importable</s-badge>}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <s-text color="subdued">
+                Each ticked sheet gets a card below with its columns and row filters.
+              </s-text>
+
+              {/* Per-sheet configuration cards — included sheets only. */}
               <s-stack direction="block" gap="small">
-                {preview.sheets.map((s, i) => (
-                  <SheetCard
-                    key={i}
-                    sheet={s}
-                    plan={plan?.[i] ?? { entity: "auto", include: true }}
-                    onEntity={(entity) => updatePlan(i, { entity, include: entity !== "ignore" })}
-                    onInclude={(include) => updatePlan(i, { include })}
-                    onFilters={(filters) => updatePlan(i, { filters })}
-                    onColumns={(columns) => updatePlan(i, { columns })}
-                    disabled={busy}
-                  />
-                ))}
+                {preview.sheets.map((s, i) => {
+                  const p = plan?.[i] ?? { entity: "auto", include: true };
+                  if (!(p.include && p.entity !== "ignore")) return null;
+                  return (
+                    <SheetCard
+                      key={i}
+                      sheet={s}
+                      plan={p}
+                      onFilters={(filters) => updatePlan(i, { filters })}
+                      onColumns={(columns) => updatePlan(i, { columns })}
+                      disabled={busy}
+                    />
+                  );
+                })}
               </s-stack>
 
               {/* Totals + import */}
@@ -454,6 +609,10 @@ export default function ImportPage() {
                 const cur = job?.progressCurrent ?? 0;
                 const tot = job?.progressTotal ?? null;
                 const pct = tot ? Math.min(100, Math.round((cur / tot) * 100)) : null;
+                // Pulse only for a RUNNING job with no countable total; while
+                // queued the bar sits empty so it never moves backwards when
+                // the first real percentage arrives.
+                const indeterminate = job?.status === "running" && tot == null;
                 return (
                   <s-stack direction="block" gap="small-200">
                     <s-text>
@@ -465,9 +624,19 @@ export default function ImportPage() {
                       aria-valuenow={pct != null ? cur : undefined}>
                       <div style={{
                         ...progressFill,
-                        width: pct != null ? `${pct}%` : "30%",
-                        ...(pct == null ? { animation: "eg-indeterminate 1.2s ease-in-out infinite" } : {}),
+                        width: indeterminate ? "30%" : `${pct ?? 0}%`,
+                        ...(indeterminate ? { animation: "eg-indeterminate 1.2s ease-in-out infinite" } : {}),
                       }} />
+                    </div>
+                    <div>
+                      <s-button
+                        variant="tertiary"
+                        tone="critical"
+                        disabled={cancelFetcher.state !== "idle" ? true : undefined}
+                        onClick={() => cancelFetcher.submit({ intent: "cancel", jobId: pollingJobId }, { method: "post" })}
+                      >
+                        Cancel import
+                      </s-button>
                     </div>
                   </s-stack>
                 );
@@ -485,13 +654,32 @@ export default function ImportPage() {
                     Import finished{job.failed > 0 ? ` with ${job.failed} error${job.failed === 1 ? "" : "s"}` : ""}.
                   </s-banner>
                   <s-stack direction="inline" gap="small">
+                    {/* Results workbook is always .xlsx — download in place. */}
                     {job.resultUrl && (
-                      <s-button variant="primary" href={job.resultUrl} target="_blank">
+                      <s-button variant="primary" href={job.resultUrl}>
                         Download results
+                      </s-button>
+                    )}
+                    {job.failed > 0 && (
+                      <s-button
+                        disabled={failedFetcher.state !== "idle" ? true : undefined}
+                        loading={failedFetcher.state !== "idle" ? true : undefined}
+                        onClick={() => failedFetcher.submit({ intent: "failedRows", jobId: job.id }, { method: "post" })}
+                      >
+                        Export failed rows
                       </s-button>
                     )}
                     <s-button href="/app">New import</s-button>
                   </s-stack>
+                  {failedFetcher.data?.failedRowsUrl && (
+                    <s-banner tone="info">
+                      {failedFetcher.data.failedRowsCount} failed row(s) ready —{" "}
+                      <s-link href={failedFetcher.data.failedRowsUrl}>download the fix-and-retry file</s-link>.
+                    </s-banner>
+                  )}
+                  {failedFetcher.data?.error && (
+                    <s-banner tone="critical">{failedFetcher.data.error}</s-banner>
+                  )}
                 </>
               )}
 
@@ -502,6 +690,17 @@ export default function ImportPage() {
                   </s-banner>
                   <s-stack direction="inline" gap="small">
                     <s-button href="/app">Try again</s-button>
+                  </s-stack>
+                </>
+              )}
+
+              {finished && job.status === "cancelled" && (
+                <>
+                  <s-banner tone="warning">
+                    Import cancelled. Rows already written before the cancel stay applied.
+                  </s-banner>
+                  <s-stack direction="inline" gap="small">
+                    <s-button href="/app">New import</s-button>
                   </s-stack>
                 </>
               )}
@@ -525,7 +724,7 @@ export default function ImportPage() {
 // ─── components ──────────────────────────────────────────────────────────────
 
 /* eslint-disable react/prop-types */
-function SheetCard({ sheet, plan, onEntity, onInclude, onFilters, onColumns, disabled }) {
+function SheetCard({ sheet, plan, onFilters, onColumns, disabled }) {
   const name = sheet.name ?? "Sheet";
   const included = plan.include && plan.entity !== "ignore";
   const columns = sheet.columns ?? [];
@@ -557,33 +756,13 @@ function SheetCard({ sheet, plan, onEntity, onInclude, onFilters, onColumns, dis
 
   return (
     <div style={{ ...sheetCard, opacity: included ? 1 : 0.6 }}>
-      {/* Row 1: include + name + entity selector */}
+      {/* Row 1: name + detection note (include + entity mapping live in the
+          review table above). */}
       <div style={sheetHead}>
-        <label style={{ display: "flex", alignItems: "center", gap: ".5rem", cursor: "pointer" }}>
-          <input
-            type="checkbox"
-            checked={included}
-            onChange={(e) => onInclude(e.target.checked)}
-            disabled={disabled}
-          />
-          <s-text type="strong">{name}</s-text>
-        </label>
-
-        <div style={{ display: "flex", alignItems: "center", gap: ".5rem" }}>
-          {sheet.detection?.via && sheet.ok && (
-            <s-text color="subdued">detected by {sheet.detection.via}</s-text>
-          )}
-          <PolarisSelect
-            label="Import as"
-            value={plan.entity}
-            onChange={(v) => onEntity(v)}
-            disabled={disabled}
-          >
-            {ENTITY_OPTIONS.map((o) => (
-              <s-option key={o.value} value={o.value}>{o.label}</s-option>
-            ))}
-          </PolarisSelect>
-        </div>
+        <s-text type="strong">{name}</s-text>
+        {sheet.detection?.via && sheet.ok && (
+          <s-text color="subdued">detected by {sheet.detection.via}</s-text>
+        )}
       </div>
 
       {/* Row 2: counts / status */}
@@ -722,6 +901,18 @@ const statBox = {
 const sheetCard = {
   border: "1px solid #e1e3e5", borderRadius: 10, padding: ".85rem 1rem", background: "#fff",
 };
+// Sheets review table — header styled exactly like the export Sheets table.
+const reviewTable = {
+  width: "100%", borderCollapse: "collapse", fontSize: ".8125rem",
+};
+const reviewTh = {
+  padding: ".4rem .5rem", fontSize: ".75rem", fontWeight: 600,
+  color: "#616a75", whiteSpace: "nowrap", textAlign: "left",
+  borderBottom: "1px solid #ebebeb",
+};
+const reviewTd = {
+  padding: ".3rem .5rem", borderTop: "1px solid #f1f2f3", verticalAlign: "middle",
+};
 const sheetHead = {
   display: "flex", justifyContent: "space-between", alignItems: "center",
   gap: "1rem", flexWrap: "wrap",
@@ -750,8 +941,8 @@ const chipUnknown = {
   ...chip, background: "#fff4e4", color: "#8a6116", border: "1px solid #ffd79d",
 };
 const progressTrack = {
-  width: "100%", height: 8, background: "#e3e5e7", borderRadius: 4, overflow: "hidden",
+  width: "100%", height: 4, background: "#e3e5e7", borderRadius: 2, overflow: "hidden",
 };
 const progressFill = {
-  height: "100%", borderRadius: 4, background: "#2c6ecb", transition: "width .3s ease",
+  height: "100%", borderRadius: 2, background: "#2c6ecb", transition: "width .3s ease",
 };

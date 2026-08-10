@@ -44,39 +44,57 @@ export const PRODUCT_FIELDS = [
 ];
 
 // Numbered tax-line columns (capped at 5 sets, matching normalizer ORDER_TAX_CAP).
-const taxCols = (prefix, cap) =>
+// Order-level taxes also carry a presentment-currency price.
+const taxCols = (prefix, cap, { presentment = false } = {}) =>
   Array.from({ length: cap }, (_, i) => [
     `${prefix}_${i + 1}_title`, `${prefix}_${i + 1}_rate`,
-    `${prefix}_${i + 1}_price`, `${prefix}_${i + 1}_channel_liable`,
+    `${prefix}_${i + 1}_price`,
+    ...(presentment ? [`${prefix}_${i + 1}_presentment_price`] : []),
+    `${prefix}_${i + 1}_channel_liable`,
   ]).flat();
-export const ORDER_TAX_FIELDS = taxCols("tax", 5);
+export const ORDER_TAX_FIELDS = taxCols("tax", 5, { presentment: true });
 export const LINE_TAX_FIELDS = taxCols("line_tax", 5);
 
 export const ORDER_FIELDS = [
   // Row type
   "line_type", "top_row", "row_number",
   // Order
-  "order_id", "order_name", "order_number", "email", "phone", "note", "tags",
+  "order_id", "command", "order_name", "order_number", "email", "phone", "note",
+  "tags", "tags_command",
   "financial_status", "fulfillment_status", "currency", "presentment_currency",
   "taxes_included", "test", "confirmed", "source_name", "source_identifier",
-  "confirmation_number", "send_receipt", "inventory_behaviour",
-  "cancel_send_receipt", "cancel_refund", "order_status_url",
+  "source_url", "physical_location", "user_id", "checkout_id", "cart_token",
+  "token", "confirmation_number", "po_number", "additional_details",
+  "send_receipt", "inventory_behaviour",
+  "cancel_send_receipt", "cancel_refund", "cancel_restock", "order_status_url",
+  "payment_terms_type", "payment_terms_issued_at", "payment_terms_due_at",
+  "payment_terms_completed_at", "payment_terms_overdue",
   "line_items_quantity", "total_weight", "cancel_reason", "cancelled_at",
   "closed_at", "processed_at", "created_at", "updated_at",
   // Totals
-  "total_price", "subtotal_price", "total_tax", "total_shipping",
+  "total_price", "subtotal_price", "total_line_items_price",
+  "current_subtotal_price", "total_tax", "total_shipping",
+  "current_total_shipping",
   "total_discounts", "current_total_price", "total_refunded",
   "current_total_duties", "total_duties", "current_total_fees", "total_fees",
-  "total_received", "net_payment", "total_capturable", "tax_lines",
+  "total_received", "net_payment", "total_capturable", "total_outstanding",
+  "tax_lines",
+  // Presentment-currency totals
+  "presentment_subtotal", "presentment_total_tax", "presentment_total_shipping",
+  "presentment_total_discounts", "presentment_total_duties",
+  "presentment_total_fees", "presentment_total_refunded",
+  "presentment_total_outstanding", "presentment_total_price",
   // Order taxes (numbered)
   ...ORDER_TAX_FIELDS,
   // Browser / UTM
   "browser_ip", "landing_page", "referrer_url", "source", "source_type",
   "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
   // Company
-  "company_id", "company_name", "company_location_id", "company_location_name",
+  "company_id", "company_name", "company_external_id",
+  "company_location_id", "company_location_name", "company_location_external_id",
   // Risk
-  "risk_recommendation", "risk_level", "risk_facts",
+  "risk_recommendation", "risk_level", "risk_source", "risk_score",
+  "risk_cause_cancel", "risk_message", "risk_facts",
   // Buyer
   "customer_id", "customer_email", "customer_phone", "customer_first_name",
   "customer_last_name", "customer_note", "customer_state",
@@ -95,15 +113,24 @@ export const ORDER_FIELDS = [
   "shipping_line_code", "shipping_line_source", "shipping_line_price",
   "shipping_line_tax",
   // Items
-  "line_item_id", "line_item_title", "line_item_name", "line_item_variant_title",
+  "line_item_id", "line_item_command", "line_item_title", "line_item_name",
+  "line_item_variant_title",
   "line_item_sku", "line_item_vendor", "line_item_quantity",
   "line_item_current_quantity", "line_item_unfulfilled_quantity",
   "line_item_price", "line_item_discounted_price", "line_item_total",
-  "line_item_total_discount", "line_item_taxable", "line_item_requires_shipping",
-  "line_item_gift_card", "line_item_properties", "line_item_fulfillment_status",
+  "line_item_total_discount", "line_item_discount_allocation",
+  "line_item_discount_per_item", "line_item_grams", "line_item_tax_total",
+  "line_item_pre_tax_price", "line_item_taxable", "line_item_requires_shipping",
+  "line_item_gift_card", "line_item_force_gift_card", "line_item_properties",
+  "line_item_fulfillment_status", "line_item_fulfillment_service",
   "line_item_product_id", "line_item_variant_id", "line_item_product_handle",
+  // Presentment-currency line prices
+  "line_item_presentment_price", "line_item_presentment_currency",
+  "line_item_presentment_discount", "line_item_presentment_discount_allocation",
+  "line_item_presentment_discount_per_item", "line_item_presentment_total",
   // Item Data
-  "line_item_product_type", "line_item_product_tags", "line_item_variant_barcode",
+  "line_item_product_type", "line_item_product_tags", "line_item_variant_sku",
+  "line_item_variant_barcode",
   "line_item_variant_weight", "line_item_variant_weight_unit",
   "line_item_variant_inventory_qty", "line_item_variant_cost",
   "line_item_variant_price", "line_item_variant_compare_at_price",
@@ -113,7 +140,10 @@ export const ORDER_FIELDS = [
   ...LINE_TAX_FIELDS,
   // Transactions
   "transaction_id", "transaction_kind", "transaction_status", "transaction_gateway",
-  "transaction_amount", "transaction_currency", "transaction_processed_at",
+  "transaction_force_gateway",
+  "transaction_amount", "transaction_currency",
+  "transaction_shop_currency_amount", "transaction_shop_currency",
+  "transaction_processed_at", "transaction_authorization",
   "transaction_payment_id", "transaction_account_number", "transaction_error_code",
   "transaction_test", "transaction_parent_id",
   "transaction_payment_method", "transaction_wallet", "transaction_message",
@@ -122,10 +152,11 @@ export const ORDER_FIELDS = [
   "transaction_user_id",
   // Refunds
   "refund_id", "refund_created_at", "refund_note", "refund_amount", "refund_currency",
-  "refund_restock_type", "refund_restock_location", "refund_send_receipt",
-  "refund_generate_transaction",
+  "refund_restock", "refund_restock_type", "refund_restock_location",
+  "refund_send_receipt", "refund_generate_transaction",
   // Fulfillments
   "fulfillment_id", "fulfillment_display_status", "fulfillment_created_at",
+  "fulfillment_processed_at",
   "fulfillment_updated_at", "fulfillment_total_quantity", "fulfillment_service",
   "fulfillment_location", "fulfillment_shipment_status", "fulfillment_send_receipt",
   "fulfillment_tracking_company", "fulfillment_tracking_number", "fulfillment_tracking_url",
@@ -163,7 +194,7 @@ export const CUSTOMER_FIELDS = [
 
 export const COLLECTION_FIELDS = [
   // Basics
-  "collection_id", "title", "handle", "description", "body_html",
+  "collection_id", "command", "title", "handle", "description", "body_html",
   "collection_type", "sort_order", "template_suffix", "products_count",
   "updated_at",
   // Media
@@ -176,7 +207,7 @@ export const COLLECTION_FIELDS = [
 
 export const DISCOUNT_FIELDS = [
   // Basics
-  "discount_id", "title", "summary", "type", "method", "codes",
+  "discount_id", "command", "title", "summary", "type", "method", "codes",
   "value_type", "value", "status", "starts_at", "ends_at",
   "created_at", "updated_at",
   // Usage
@@ -204,6 +235,75 @@ export const ARTICLE_FIELDS = [
 ];
 
 export const REDIRECT_FIELDS = ["redirect_id", "command", "path", "target"];
+
+// ─── long-tail entities ──────────────────────────────────────────────────────
+
+export const INVENTORY_FIELDS = [
+  "inventory_item_id", "sku", "product_title", "product_handle", "variant_title",
+  "variant_id", "location", "location_id", "available", "on_hand", "committed",
+  "incoming", "tracked", "requires_shipping", "cost", "cost_currency",
+  "country_of_origin", "hs_code", "weight", "weight_unit",
+];
+
+export const SELLING_PLAN_FIELDS = [
+  "selling_plan_group_id", "group_name", "merchant_code", "group_description",
+  "group_summary", "group_options", "position", "app_id", "products_count",
+  "variants_count", "selling_plan_id", "plan_name", "plan_description",
+  "plan_options", "plan_category", "billing_interval", "billing_interval_count",
+  "delivery_interval", "delivery_interval_count", "created_at",
+];
+
+export const MARKET_FIELDS = ["market_id", "name", "handle", "status"];
+
+export const DELIVERY_PROFILE_FIELDS = [
+  "delivery_profile_id", "name", "is_default", "active_rates",
+  "locations_without_rates", "origin_locations", "variants_count",
+];
+
+export const SEGMENT_FIELDS = ["segment_id", "name", "query", "created_at", "updated_at"];
+
+export const SUBSCRIPTION_FIELDS = [
+  "subscription_id", "top_row", "status", "customer_email", "customer_name",
+  "next_billing_date", "currency", "billing_interval", "billing_interval_count",
+  "billing_min_cycles", "billing_max_cycles", "delivery_interval",
+  "delivery_interval_count", "line_title", "line_variant_title", "line_sku",
+  "line_quantity", "line_price", "created_at",
+];
+
+export const STORE_CREDIT_FIELDS = [
+  "store_credit_account_id", "customer_id", "customer_email", "customer_name",
+  "balance", "currency",
+];
+
+export const PRODUCT_MEDIA_FIELDS = [
+  "product_id", "handle", "product_title", "media_id", "position", "media_type",
+  "media_url", "alt", "media_status", "width", "height", "media_format",
+];
+
+/**
+ * Fine-grained entities gated by a parent's Sheet Permission: blocking
+ * "Collections" in Settings also blocks the smart/manual split tiles, and
+ * blocking "Content" blocks Blog posts.
+ */
+export const ENTITY_PERMISSION_PARENT = {
+  smart_collections: "collections",
+  custom_collections: "collections",
+  articles: "content",
+  pages: "content",
+  blogs: "content",
+};
+
+/** Whether an entity is blocked by Sheet Permissions (directly or via parent). */
+export function isEntityBlocked(entity, blockedEntities) {
+  const blocked = new Set(blockedEntities ?? []);
+  return blocked.has(entity) || blocked.has(ENTITY_PERMISSION_PARENT[entity]);
+}
+
+export const GIFT_CARD_FIELDS = [
+  "gift_card_id", "command", "last_characters", "initial_value", "balance",
+  "currency", "customer_email", "customer_name", "linked_order", "note",
+  "expires_on", "enabled", "deactivated_at", "created_at",
+];
 
 export const SHOP_FIELDS = [
   // Shop
@@ -352,6 +452,15 @@ export const FIELDS_BY_ENTITY = {
   blogs:       BLOG_FIELDS,
   articles:    ARTICLE_FIELDS,
   redirects:   REDIRECT_FIELDS,
+  gift_cards:  GIFT_CARD_FIELDS,
+  inventory:          INVENTORY_FIELDS,
+  selling_plans:      SELLING_PLAN_FIELDS,
+  markets:            MARKET_FIELDS,
+  delivery_profiles:  DELIVERY_PROFILE_FIELDS,
+  segments:           SEGMENT_FIELDS,
+  subscriptions:      SUBSCRIPTION_FIELDS,
+  store_credit:       STORE_CREDIT_FIELDS,
+  product_media:      PRODUCT_MEDIA_FIELDS,
   shop:        SHOP_FIELDS,
   files:       FILE_FIELDS,
   payouts:     PAYOUT_FIELDS,
@@ -574,6 +683,17 @@ export const COLUMN_GROUPS_BY_ENTITY = {
   redirects: [
     { label: "Redirect", fields: ["redirect_id", "command", "path", "target"] },
   ],
+  gift_cards: [
+    { label: "Gift Card", fields: GIFT_CARD_FIELDS },
+  ],
+  inventory:         [{ label: "Inventory", fields: INVENTORY_FIELDS }],
+  selling_plans:     [{ label: "Selling Plan", fields: SELLING_PLAN_FIELDS }],
+  markets:           [{ label: "Market", fields: MARKET_FIELDS }],
+  delivery_profiles: [{ label: "Delivery Profile", fields: DELIVERY_PROFILE_FIELDS }],
+  segments:          [{ label: "Segment", fields: SEGMENT_FIELDS }],
+  subscriptions:     [{ label: "Subscription", fields: SUBSCRIPTION_FIELDS }],
+  store_credit:      [{ label: "Store Credit", fields: STORE_CREDIT_FIELDS }],
+  product_media:     [{ label: "Product Media", fields: PRODUCT_MEDIA_FIELDS }],
   shop: [
     { label: "Shop", fields: [
       "shop_id", "name", "email", "contact_email", "domain", "primary_domain",
@@ -995,6 +1115,81 @@ export const FIELD_LABELS = {
   path: "Path",
   target: "Target",
 
+  // Inventory (sku/variant_id/location_id/weight* inherited above)
+  inventory_item_id: "Inventory Item ID",
+  product_title: "Product Title",
+  product_handle: "Product Handle",
+  variant_title: "Variant Title",
+  location: "Location",
+  available: "Available",
+  on_hand: "On Hand",
+  committed: "Committed",
+  incoming: "Incoming",
+  tracked: "Tracked",
+  cost: "Cost",
+  cost_currency: "Cost Currency",
+  country_of_origin: "Country of Origin",
+  hs_code: "HS Code",
+
+  // Selling plans
+  selling_plan_group_id: "Group ID",
+  group_name: "Group Name",
+  merchant_code: "Merchant Code",
+  group_description: "Group Description",
+  group_summary: "Group Summary",
+  group_options: "Group Options",
+  position: "Position",
+  app_id: "App ID",
+  variants_count: "Variants Count",
+  selling_plan_id: "Plan ID",
+  plan_description: "Plan Description",
+  plan_options: "Plan Options",
+  plan_category: "Plan Category",
+  billing_interval: "Billing Interval",
+  billing_interval_count: "Billing Interval Count",
+  delivery_interval: "Delivery Interval",
+  delivery_interval_count: "Delivery Interval Count",
+
+  // Markets / delivery profiles / segments
+  market_id: "ID",
+  delivery_profile_id: "ID",
+  is_default: "Default",
+  active_rates: "Active Rates",
+  locations_without_rates: "Locations Without Rates",
+  origin_locations: "Origin Locations",
+  segment_id: "ID",
+  query: "Query",
+
+  // Subscriptions
+  subscription_id: "Subscription ID",
+  next_billing_date: "Next Billing Date",
+  billing_min_cycles: "Min Cycles",
+  billing_max_cycles: "Max Cycles",
+  line_title: "Line Title",
+  line_variant_title: "Line Variant Title",
+  line_sku: "Line SKU",
+  line_quantity: "Line Quantity",
+  line_price: "Line Price",
+
+  // Store credit / product media
+  store_credit_account_id: "Account ID",
+  media_id: "Media ID",
+  media_type: "Media Type",
+  media_url: "Media URL",
+  media_status: "Media Status",
+  media_format: "Media Format",
+
+  // Gift cards (command/note/created_at/customer_email inherited above)
+  gift_card_id: "ID",
+  last_characters: "Last Characters",
+  initial_value: "Initial Value",
+  balance: "Balance",
+  customer_name: "Customer Name",
+  linked_order: "Order",
+  expires_on: "Expires On",
+  enabled: "Enabled",
+  deactivated_at: "Deactivated At",
+
   // Shop (name/email/created_at/updated_at/address_* inherited above)
   shop_id: "ID",
   contact_email: "Contact Email",
@@ -1240,6 +1435,66 @@ export const FIELD_LABELS = {
   fulfillment_tracking_number: "Fulfillment Tracking Number",
   fulfillment_tracking_url: "Fulfillment Tracking URL",
 
+  // Orders — Altera parity additions
+  source_url: "Source URL",
+  physical_location: "Physical Location",
+  user_id: "User ID",
+  checkout_id: "Checkout ID",
+  cart_token: "Cart Token",
+  token: "Token",
+  po_number: "Purchase Order Number",
+  additional_details: "Additional Details",
+  cancel_restock: "Cancel: Restock",
+  payment_terms_type: "Payment Terms: Type",
+  payment_terms_issued_at: "Payment Terms: Issued At",
+  payment_terms_due_at: "Payment Terms: Due At",
+  payment_terms_completed_at: "Payment Terms: Completed At",
+  payment_terms_overdue: "Payment Terms: Overdue",
+  total_line_items_price: "Total Line Items",
+  current_subtotal_price: "Current Subtotal",
+  current_total_shipping: "Current Total Shipping",
+  total_outstanding: "Total Outstanding",
+  presentment_subtotal: "Presentment Subtotal",
+  presentment_total_tax: "Presentment Total Tax",
+  presentment_total_shipping: "Presentment Total Shipping",
+  presentment_total_discounts: "Presentment Total Discounts",
+  presentment_total_duties: "Presentment Total Duties",
+  presentment_total_fees: "Presentment Total Fees",
+  presentment_total_refunded: "Presentment Total Refunded",
+  presentment_total_outstanding: "Presentment Total Outstanding",
+  presentment_total_price: "Presentment Total",
+  tax_1_presentment_price: "Tax 1 Presentment Price",
+  tax_2_presentment_price: "Tax 2 Presentment Price",
+  tax_3_presentment_price: "Tax 3 Presentment Price",
+  tax_4_presentment_price: "Tax 4 Presentment Price",
+  tax_5_presentment_price: "Tax 5 Presentment Price",
+  company_location_external_id: "Company Location External ID",
+  risk_source: "Risk Source",
+  risk_score: "Risk Score",
+  risk_cause_cancel: "Risk Cause Cancel",
+  risk_message: "Risk Message",
+  line_item_command: "Line: Command",
+  line_item_discount_allocation: "Line: Discount Allocation",
+  line_item_discount_per_item: "Line: Discount per Item",
+  line_item_grams: "Line: Grams",
+  line_item_tax_total: "Line: Tax Total",
+  line_item_pre_tax_price: "Line: Pre Tax Price",
+  line_item_force_gift_card: "Line: Force Gift Card",
+  line_item_fulfillment_service: "Line: Fulfillment Service",
+  line_item_presentment_price: "Line: Presentment Price",
+  line_item_presentment_currency: "Line: Presentment Currency",
+  line_item_presentment_discount: "Line: Presentment Discount",
+  line_item_presentment_discount_allocation: "Line: Presentment Discount Allocation",
+  line_item_presentment_discount_per_item: "Line: Presentment Discount per Item",
+  line_item_presentment_total: "Line: Presentment Total",
+  line_item_variant_sku: "Line: Variant SKU",
+  transaction_force_gateway: "Transaction Force Gateway",
+  transaction_shop_currency_amount: "Transaction Shop Currency Amount",
+  transaction_shop_currency: "Transaction Shop Currency",
+  transaction_authorization: "Transaction Authorization",
+  refund_restock: "Refund Restock",
+  fulfillment_processed_at: "Fulfillment Processed At",
+
   // Products — Matrixify parity padding
   collection: "Collection",
   image_attachment: "Image Attachment",
@@ -1484,6 +1739,15 @@ export const DEFAULT_FIELDS_BY_ENTITY = {
   blogs:       ["blog_id", "title", "handle"],
   articles:    ["article_id", "blog_handle", "title", "handle", "author", "published"],
   redirects:   ["redirect_id", "path", "target"],
+  gift_cards:  ["gift_card_id", "last_characters", "balance", "currency", "customer_email", "expires_on", "enabled"],
+  inventory:         ["sku", "product_title", "variant_title", "location", "available", "on_hand", "committed"],
+  selling_plans:     ["group_name", "plan_name", "billing_interval", "billing_interval_count", "products_count"],
+  markets:           MARKET_FIELDS,
+  delivery_profiles: DELIVERY_PROFILE_FIELDS,
+  segments:          SEGMENT_FIELDS,
+  subscriptions:     ["subscription_id", "status", "customer_email", "next_billing_date", "line_title", "line_quantity", "line_price"],
+  store_credit:      STORE_CREDIT_FIELDS,
+  product_media:     ["handle", "product_title", "position", "media_type", "media_url", "alt"],
   shop:        ["shop_id", "name", "domain", "email", "currency", "plan_name"],
   files:       ["file_id", "type", "alt", "url", "status", "mime_type"],
   payouts:     ["payout_id", "status", "issued_at", "amount", "currency"],

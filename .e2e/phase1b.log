@@ -1,0 +1,12 @@
+PASS  retest export discounts csv — 21-column header, 0 data rows
+PASS  retest export content csv — 18-column header, 0 data rows
+PASS  retest export articles csv — 17-column header, 0 data rows
+PASS  retest export gift_cards csv — 14-column header, 0 data rows
+PASS  retest export shop csv — 24-column header, 1 data rows
+PASS  retest export payouts csv — 15-column header, 0 data rows
+PASS  retest export companies csv — 36-column header, 0 data rows
+PASS  retest export inventory_transfers csv — 7-column header, 0 data rows
+FAIL  advanced filter (title contains jseh) — not filtered: 117
+
+=== 8/9 passed ===
+FAILED: advanced filter (title contains jseh) — not filtered: 117

@@ -94,7 +94,9 @@ function discountInput(row, code) {
     customerSelection: { all: true },
     customerGets: { value, items: { all: true } },
   };
-  if (str(row.starts_at)) input.startsAt = iso(row.starts_at);
+  // Shopify requires startsAt on create ("Starts at can't be blank") —
+  // default to now so a minimal file (code + value) imports cleanly.
+  input.startsAt = str(row.starts_at) ? iso(row.starts_at) : new Date().toISOString();
   if (str(row.ends_at)) input.endsAt = iso(row.ends_at);
   if (str(row.usage_limit) && Number.isInteger(Number(row.usage_limit))) input.usageLimit = Number(row.usage_limit);
   if (truthy(row.once_per_customer)) input.appliesOncePerCustomer = true;

@@ -28,10 +28,13 @@ import { FIELDS_BY_ENTITY } from "../export/fieldLists.js";
  * "detected Draft Orders — not yet importable", but supported ones are ranked
  * first on ties so a shared-header file leans toward something we can act on.
  */
-export const SUPPORTED_ENTITIES = ["products", "orders", "customers", "redirects", "collections", "discounts"];
+export const SUPPORTED_ENTITIES = ["products", "orders", "customers", "redirects", "collections", "discounts", "gift_cards"];
 
 /** Headers so generic they appear on nearly every entity — poor discriminators. */
-const GENERIC_HEADERS = new Set(["ID", "Command", "Top Row", "Row #", "Row Number"]);
+const GENERIC_HEADERS = new Set([
+  "ID", "Command", "Top Row", "Row #", "Row Number",
+  "Note", "Created At", "Updated At", "Currency", "Enabled",
+]);
 
 /**
  * Matrixify names each sheet after its entity ("Products", "Customers", "Smart
@@ -54,6 +57,7 @@ const NAME_ALIASES = {
   company: "companies", companies: "companies",
   "draft order": "draft_orders", "draft orders": "draft_orders",
   file: "files", files: "files",
+  "gift card": "gift_cards", "gift cards": "gift_cards",
   page_content: "content",
 };
 
@@ -129,8 +133,10 @@ export function detectEntity(headers) {
     });
 
   const best = scores[0];
-  if (!best) {
-    return { entity: null, supported: false, confidence: "none", scores: [] };
+  // Only generic columns (Note, ID, Created At…) matching is not a detection —
+  // they appear on nearly every entity, so they identify nothing.
+  if (!best || best.distinctive === 0) {
+    return { entity: null, supported: false, confidence: "none", scores: scores.slice(0, 5) };
   }
 
   // Confidence: at least two distinctive (non-generic) columns matched, and the

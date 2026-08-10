@@ -119,14 +119,20 @@ export async function uploadToR2({ buffer, filename, mimeType, shopId }) {
     throw new Error(describeR2Error(err, bucket) ?? `R2 upload failed: ${err.message}`);
   }
 
-  // 2. Generate pre-signed GET URL
+  // 2. Generate pre-signed GET URL. PDFs are served inline so the browser
+  //    opens them in a viewer tab; every other format forces a download.
+  //    ResponseContentDisposition MUST live on the GetObjectCommand input —
+  //    in getSignedUrl's options it is silently ignored, and browsers then
+  //    render viewable types (XML!) instead of downloading them.
+  const disposition = /\.pdf$/i.test(filename) ? "inline" : "attachment";
   const signedUrl = await getSignedUrl(
     client,
-    new GetObjectCommand({ Bucket: bucket, Key: r2Key }),
-    {
-      expiresIn: SIGNED_URL_EXPIRY_SECONDS,
-      ResponseContentDisposition: `attachment; filename="${filename}"`,
-    }
+    new GetObjectCommand({
+      Bucket: bucket,
+      Key:    r2Key,
+      ResponseContentDisposition: `${disposition}; filename="${filename}"`,
+    }),
+    { expiresIn: SIGNED_URL_EXPIRY_SECONDS },
   );
 
   const expiresAt = new Date(Date.now() + SIGNED_URL_EXPIRY_SECONDS * 1000);
@@ -179,8 +185,9 @@ export async function downloadFromR2(r2Key) {
 }
 
 /**
- * Pre-signed GET URL for an existing key, forcing a download with the given
- * filename. Used to hand the merchant the import results workbook.
+ * Pre-signed GET URL for an existing key with the given filename. Used for
+ * the import results workbook and for re-signing files from the dashboard.
+ * PDFs are served inline (browser viewer); everything else downloads.
  *
  * @param {string} r2Key
  * @param {string} filename
@@ -190,10 +197,16 @@ export async function signDownloadUrl(r2Key, filename) {
   const bucket = process.env.R2_BUCKET_NAME;
   if (!bucket) throw new Error("R2_BUCKET_NAME is not set");
   const client = getR2Client();
+  const disposition = /\.pdf$/i.test(filename) ? "inline" : "attachment";
+  // Disposition on the command input, not the options — see uploadToR2.
   const signedUrl = await getSignedUrl(
     client,
-    new GetObjectCommand({ Bucket: bucket, Key: r2Key }),
-    { expiresIn: SIGNED_URL_EXPIRY_SECONDS, ResponseContentDisposition: `attachment; filename="${filename}"` },
+    new GetObjectCommand({
+      Bucket: bucket,
+      Key:    r2Key,
+      ResponseContentDisposition: `${disposition}; filename="${filename}"`,
+    }),
+    { expiresIn: SIGNED_URL_EXPIRY_SECONDS },
   );
   return { signedUrl, expiresAt: new Date(Date.now() + SIGNED_URL_EXPIRY_SECONDS * 1000) };
 }
