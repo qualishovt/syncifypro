@@ -49,7 +49,7 @@ import { submitBulkOperation,
 import { toCSV }                       from "./formats/csv.js";
 import { toXML }                       from "./formats/xml.js";
 import { toJSON }                      from "./formats/json.js";
-import { toExcel, toExcelWorkbook }    from "./formats/excel.js";
+import { toExcel, toExcelWorkbook, entitySheetName } from "./formats/excel.js";
 import { toPDF, toPDFDocument }        from "./formats/pdf.js";
 import { toShopifyCSV }                from "./formats/shopifyCsv.js";
 import { toGoogleFeed }                from "./formats/googleFeed.js";
@@ -227,7 +227,7 @@ export async function runExportJob({ admin, shop, entity, format, filters = {}, 
 
   const mimeType  = MIME_TYPES[format] ?? "application/octet-stream";
   const now       = new Date();
-  const timestamp = now.toISOString().slice(0, 19).replace("T", "-").replace(/:/g, "-");
+  const timestamp = now.toISOString().slice(0, 19).replace("T", "-").replace(/:/g, "");
   const filename  = `${capitalize(entity)}-${timestamp}.${EXTENSION[format] ?? format}`;
 
   // Build the Shopify search query from the filter object
@@ -329,13 +329,13 @@ export async function runMultiEntityExport({ admin, shop, specs, format }) {
   }
 
   // 2. Bundle into a single deliverable.
-  const timestamp = new Date().toISOString().slice(0, 19).replace("T", "-").replace(/:/g, "-");
+  const timestamp = new Date().toISOString().slice(0, 19).replace("T", "-").replace(/:/g, "");
   let buffer, filename, mimeType;
 
   if (format === "excel") {
     buffer = toExcelWorkbook(
       results.map((r) => ({
-        name:    capitalize(r.entity),
+        name:    entitySheetName(r.entity),
         rows:    r.rows,
         columns: r.fields,
       })),
@@ -345,7 +345,7 @@ export async function runMultiEntityExport({ admin, shop, specs, format }) {
   } else if (format === "pdf") {
     buffer = toPDFDocument(
       results.map((r) => ({
-        name:    capitalize(r.entity),
+        name:    entitySheetName(r.entity),
         rows:    r.rows,
         columns: r.fields,
       })),
@@ -681,6 +681,7 @@ export function renderExportFilename(template, { shop = "", ext = "csv", now = n
  */
 async function deliverAfterExport({ shop, options, filename, body, mimeType }) {
   const target = String(options.deliverTarget || "");
+  const path = String(options.deliverPath || "");
   if (target) {
     const { getImportServer } = await import("../db/importServer.server.js");
     const server = await getImportServer(shop, target);
@@ -692,7 +693,7 @@ async function deliverAfterExport({ shop, options, filename, body, mimeType }) {
           region: server.region || "us-east-1",
           accessKeyId: server.username,
           secretAccessKey: server.password,
-          prefix: "",
+          prefix: path,
         }, { filename, body, contentType: mimeType });
       } else {
         const { uploadToFtp } = await import("../schedules/delivery.server.js");
@@ -702,10 +703,28 @@ async function deliverAfterExport({ shop, options, filename, body, mimeType }) {
           port: server.port,
           user: server.username,
           password: server.password,
-          path: "",
+          path,
         }, { filename, body });
       }
     }
+  } else if (options.deliverUrl) {
+    // Ad-hoc destination typed as a URL — credentials ride in the URL itself
+    // (ftp://user:pass@host/folder), used once and never saved.
+    try {
+      const u = new URL(String(options.deliverUrl));
+      const protocol = u.protocol.replace(/:$/, "").toLowerCase();
+      if (["ftp", "ftps", "sftp"].includes(protocol)) {
+        const { uploadToFtp } = await import("../schedules/delivery.server.js");
+        await uploadToFtp({
+          protocol,
+          host: u.hostname,
+          port: u.port ? Number(u.port) : undefined,
+          user: decodeURIComponent(u.username || ""),
+          password: decodeURIComponent(u.password || ""),
+          path: decodeURIComponent(u.pathname || ""),
+        }, { filename, body });
+      }
+    } catch { /* an unparsable URL just skips delivery — the file is exported */ }
   }
   if (options.emailTo?.trim()) {
     const { sendScheduleEmail } = await import("../schedules/mailer.server.js");
@@ -785,7 +804,7 @@ async function processTrackedExportInner({ admin, shop, job, specs, format, spli
   for (const r of results) r.rows = applyValueFormatting(r.rows, format, options);
 
   // Bundle: single entity → one file; multiple → zip (or one Excel workbook).
-  const timestamp = new Date().toISOString().slice(0, 19).replace("T", "-").replace(/:/g, "-");
+  const timestamp = new Date().toISOString().slice(0, 19).replace("T", "-").replace(/:/g, "");
   const rowCount = results.reduce((sum, r) => sum + r.rows.length, 0);
   let buffer, filename, mimeType;
 
@@ -819,11 +838,11 @@ async function processTrackedExportInner({ admin, shop, job, specs, format, spli
     filename  = `${capitalize(r.entity)}-${timestamp}.${ext}`;
     mimeType  = MIME_TYPES[format] ?? "application/octet-stream";
   } else if (format === "excel" && !wasSplit) {
-    buffer   = toExcelWorkbook(results.map((r) => ({ name: capitalize(r.entity), rows: r.rows, columns: columnsFor(r) })));
+    buffer   = toExcelWorkbook(results.map((r) => ({ name: entitySheetName(r.entity), rows: r.rows, columns: columnsFor(r) })));
     filename = `Export-${timestamp}.xlsx`;
     mimeType = MIME_TYPES.excel;
   } else if (format === "pdf" && !wasSplit) {
-    buffer   = toPDFDocument(results.map((r) => ({ name: capitalize(r.entity), rows: r.rows, columns: columnsFor(r) })));
+    buffer   = toPDFDocument(results.map((r) => ({ name: entitySheetName(r.entity), rows: r.rows, columns: columnsFor(r) })));
     filename = `Export-${timestamp}.pdf`;
     mimeType = MIME_TYPES.pdf;
   } else {
@@ -832,9 +851,9 @@ async function processTrackedExportInner({ admin, shop, job, specs, format, spli
       entries.push({
         name: p.name,
         data: format === "excel"
-          ? toExcelWorkbook([{ name: capitalize(p.entity), rows: p.rows, columns: p.columns }])
+          ? toExcelWorkbook([{ name: entitySheetName(p.entity), rows: p.rows, columns: p.columns }])
           : format === "pdf"
-            ? toPDFDocument([{ name: capitalize(p.entity), rows: p.rows, columns: p.columns }])
+            ? toPDFDocument([{ name: entitySheetName(p.entity), rows: p.rows, columns: p.columns }])
             : await FORMAT_ADAPTERS[format](p.rows, p.columns, p.entity, adapterCtx),
       });
     }
@@ -876,7 +895,7 @@ async function processTrackedExportInner({ admin, shop, job, specs, format, spli
   await snapProgressFull(job.id, base);
   await markJobComplete({ id: job.id, r2Key, signedUrl, signedUrlExpiry: expiresAt, rowCount });
 
-  if (options.deliverTarget || options.emailTo?.trim()) {
+  if (options.deliverTarget || options.deliverUrl || options.emailTo?.trim()) {
     try {
       await deliverAfterExport({ shop, options, filename, body: buffer, mimeType });
     } catch (err) {

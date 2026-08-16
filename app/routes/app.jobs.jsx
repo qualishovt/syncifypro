@@ -28,6 +28,7 @@ const STATUSES = [
   { value: "complete", label: "Complete" },
   { value: "running", label: "Running" },
   { value: "pending", label: "Queued" },
+  { value: "ready", label: "Ready to import" },
   { value: "failed", label: "Failed" },
   { value: "cancelled", label: "Cancelled" },
 ];
@@ -105,13 +106,21 @@ function importRow(j) {
   const files = [];
   if (j.sourceR2Key) files.push({ key: j.sourceR2Key, name: j.filename || "source" });
   if (j.status === "complete" && j.resultR2Key) files.push({ key: j.resultR2Key, name: "Import result.xlsx" });
+  // A "ready" preview links back to its import page (to finish configuring
+  // and run it) rather than to a run page that has nothing to show yet.
+  const previewHref = j.status === "ready" && j.sourceR2Key
+    ? `/app/import?src=${encodeURIComponent(j.sourceR2Key)}&name=${encodeURIComponent(j.filename || "import")}&job=${encodeURIComponent(j.id)}`
+    : null;
   return {
     id: j.id, type: "import", number: j.number ?? null,
     name: (j.filename || titleCase(j.entity) || "import").replace(/\.[^.]+$/, ""),
     format: j.format, status: j.status,
-    detail: `${j.created ?? 0} new · ${j.updated ?? 0} upd · ${j.deleted ?? 0} del${j.failed ? ` · ${j.failed} failed` : ""}`,
+    detail: j.status === "ready"
+      ? "Staged — not imported yet"
+      : `${j.created ?? 0} new · ${j.updated ?? 0} upd · ${j.deleted ?? 0} del${j.failed ? ` · ${j.failed} failed` : ""}`,
     createdAt: iso(j.createdAt), completedAt: iso(j.completedAt),
     errorMessage: j.errorMessage ?? null,
+    href: previewHref,
     _files: files,
   };
 }
@@ -170,8 +179,10 @@ export async function action({ request }) {
 
 // ─── UI ─────────────────────────────────────────────────────────────────────────
 
-const STATUS_TONE = { complete: "success", failed: "critical", running: "info", pending: "info", cancelled: "warning" };
-const STATUS_LABEL = { complete: "Complete", failed: "Failed", running: "Running", pending: "Queued", cancelled: "Cancelled" };
+// "ready" = an import preview whose file is staged and numbered but not yet
+// run (the row Import arms) — a benign, actionable state.
+const STATUS_TONE = { complete: "success", failed: "critical", running: "info", pending: "info", ready: "attention", cancelled: "warning" };
+const STATUS_LABEL = { complete: "Complete", failed: "Failed", running: "Running", pending: "Queued", ready: "Ready to import", cancelled: "Cancelled" };
 
 export default function JobsPage() {
   const { jobs, total, page, pages, type, status, timezone } = useLoaderData();
@@ -249,7 +260,7 @@ export default function JobsPage() {
                 return (
                   <s-table-row key={`${j.type}-${j.id}`}>
                     <s-table-cell>
-                      <s-link href={`/app/run/${j.id}`}>
+                      <s-link href={j.href ?? `/app/run/${j.id}`}>
                         {j.number ?? "—"}
                       </s-link>
                     </s-table-cell>

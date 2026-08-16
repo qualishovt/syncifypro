@@ -41,6 +41,13 @@ export async function loader({ request, params }) {
   }
   if (j && j.shop !== session.shop) throw data("Run not found", { status: 404 });
 
+  // A "ready" import is a staged preview that hasn't run — there's no run to
+  // show, so hand over to the import page where it can be finished.
+  if (j && kind === "import" && j.status === "ready" && j.sourceR2Key) {
+    const { redirect } = await import("react-router");
+    throw redirect(`/app/import?src=${encodeURIComponent(j.sourceR2Key)}&name=${encodeURIComponent(j.filename || "import")}&job=${encodeURIComponent(j.id)}`);
+  }
+
   // No row yet: the export page navigates here OPTIMISTICALLY with a
   // client-generated id and the start payload in history state — the page
   // opens instantly and creates the job from here. Render the starting shell.
@@ -55,11 +62,15 @@ export async function loader({ request, params }) {
   // Fresh signed URLs for whatever files the run produced (stored ones
   // expire in ~1h; the R2 objects live ~7 days).
   const basename = (k) => String(k).split("/").pop();
+  const { getObjectSize } = await import("../export/delivery/r2.js");
   const files = [];
   const sign = async (key, name, main = false) => {
     try {
-      const { signedUrl } = await signDownloadUrl(key, name);
-      files.push({ url: signedUrl, name, main });
+      const [{ signedUrl }, size] = await Promise.all([
+        signDownloadUrl(key, name),
+        getObjectSize(key),
+      ]);
+      files.push({ url: signedUrl, name, main, size });
     } catch { /* aged out of R2 */ }
   };
   if (kind === "export" && j.status === "complete" && j.r2Key) {
@@ -321,8 +332,8 @@ const isDefaultCsv = (c) => !c || (
   && c.newline !== "\n" && !c.forceQuotes && !c.bom
   && (!c.encoding || c.encoding === "utf8")
 );
-const STATUS_TONE = { complete: "success", failed: "critical", running: "info", pending: "info", cancelled: "warning" };
-const STATUS_LABEL = { complete: "Complete", failed: "Failed", running: "Running", pending: "Queued", cancelled: "Cancelled" };
+const STATUS_TONE = { complete: "success", failed: "critical", running: "info", pending: "info", ready: "attention", cancelled: "warning" };
+const STATUS_LABEL = { complete: "Complete", failed: "Failed", running: "Running", pending: "Queued", ready: "Ready to import", cancelled: "Cancelled" };
 const FORMAT_LABELS = {
   csv: "CSV", excel: "Excel", xml: "XML", json: "JSON", pdf: "PDF",
   csv_shopify: "Shopify CSV", google_feed: "Google Shopping Feed",
@@ -394,7 +405,11 @@ export default function JobPage() {
 
   // ── Delivery state (exports only) ─────────────────────────────────────────
   const [deliverTarget, setDeliverTarget] = useState("");
+  const [copied, setCopied] = useState(false); // "Copy file URL" feedback
   const [deliverUrl, setDeliverUrl] = useState("");
+  // What the user last TYPED in URL mode — picking a saved server overwrites
+  // the field with the server's URL, so switching back restores this.
+  const typedDeliverUrl = useRef("");
   const [addingServer, setAddingServer] = useState(false);
   const [deliverTriggerRef, deliverTriggerWidth] = useElementWidth();
   const delivering = deliverFetcher.state !== "idle";
@@ -465,9 +480,7 @@ export default function JobPage() {
                     rest as placeholders that fill in as data lands. */}
                 <s-grid gridTemplateColumns="repeat(auto-fit, minmax(150px, 1fr))" gap="base">
                   <Fact label="ID"><span style={mutedValue}>—</span></Fact>
-                  <Fact label="Format">
-                    {FORMAT_LABELS[startPayload.format] ?? String(startPayload.format ?? "").toUpperCase()}
-                  </Fact>
+                  {/* Format lives in the status-row badge above, not here. */}
                   <Fact label="Started">Just now</Fact>
                   <Fact label="Finished"><span style={mutedValue}>—</span></Fact>
                   <Fact label="Duration"><span style={mutedValue}>—</span></Fact>
@@ -613,183 +626,201 @@ export default function JobPage() {
         @keyframes jp-indeterminate { 0% { transform: translateX(-120%); } 100% { transform: translateX(320%); } }
       `}</style>
 
-      {/* ── Files + delivery ── */}
-      {files.length > 0 && !finishing && (
-        <s-section heading={job.kind === "export" ? "Your file" : "Files"}>
-          <s-stack direction="block" gap="base">
-            {/* The export's file gets the green "ready" treatment; any other
-                files (import source, result workbook) are plain rows. */}
-            {job.kind === "export" && mainFile ? (
-              <div style={downloadBox}>
-                <div style={downloadHead}>
-                  <span style={downloadCheck}>
-                    <s-icon type="check-circle" tone="success" />
-                  </span>
-                  <span style={downloadTitle}>Your file is ready</span>
-                </div>
-                <div style={downloadFileRow}>
-                  <span style={downloadFile}>{mainFile.name}</span>
-                  {job.rowCount ? (
-                    <s-text color="subdued">· {job.rowCount.toLocaleString()} rows</s-text>
-                  ) : null}
-                </div>
-                <div>
-                  {/* PDFs open in a viewer tab; other formats download in place. */}
-                  <s-button
-                    variant="primary"
-                    icon="download"
-                    href={mainFile.url}
-                    target={/\.pdf$/i.test(mainFile.name) ? "_blank" : undefined}
-                  >
-                    Download
-                  </s-button>
-                </div>
-              </div>
-            ) : (
-              files.map((f) => (
-                <s-grid key={f.name} gridTemplateColumns="1fr auto" gap="base" alignItems="center">
-                  <span style={{ fontWeight: 600 }}>{f.name}</span>
-                  <s-button
-                    variant={f.main ? "primary" : "secondary"}
-                    icon="download"
-                    href={f.url}
-                    target={/\.pdf$/i.test(f.name) ? "_blank" : undefined}
-                  >
-                    Download
-                  </s-button>
-                </s-grid>
-              ))
+      {/* ── The export's file: a PAGE-LEVEL success banner. Placement matters —
+          inside an s-section the component renders its flat inline variant;
+          as a direct child of s-page it gets the prominent title-bar look. */}
+      {files.length > 0 && !finishing && job.kind === "export" && mainFile && (
+        <>
+        <s-banner tone="success" heading="Your file is ready">
+          <span style={downloadFileRow}>
+            <span style={downloadFile}>{mainFile.name}</span>
+            {mainFile.size != null && (
+              <s-text color="subdued">· {humanSize(mainFile.size)}</s-text>
             )}
+            <span>
+              <s-tooltip id="copy-url-tip">{copied ? "Copied" : "Copy file URL"}</s-tooltip>
+              <s-button
+                interestFor="copy-url-tip"
+                variant="tertiary"
+                icon={copied ? "check" : "clipboard"}
+                accessibilityLabel="Copy file URL"
+                onClick={() => {
+                  navigator.clipboard?.writeText(mainFile.url).then(() => {
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                  }).catch(() => {});
+                }}
+              />
+            </span>
+          </span>
 
-            {/* On-demand delivery — exports only. */}
-            {job.kind === "export" && mainFile && (
-              <>
-                <PrefetchPageLinks page="/app/servers" />
-                <s-divider />
-                <div>
-                  <span style={deliverLabel}>Deliver to</span>
-                  <div style={fieldHelpWrap}>
-                    <s-grid gridTemplateColumns="auto 1fr auto" gap="small-200" alignItems="center">
-                      <div ref={deliverTriggerRef} style={{ minWidth: 180 }}>
-                        <s-clickable
-                          command="--toggle"
-                          commandFor="deliver-popover"
-                          inlineSize="100%"
-                          borderWidth="base"
-                          borderStyle="solid"
-                          borderColor="strong"
-                          borderRadius="base"
-                          paddingInline="small-100"
-                          blockSize="32px"
-                          background="base"
-                        >
-                          {(() => {
-                            const sel = servers.find((s) => s.id === deliverTarget);
-                            return (
-                              <s-grid gridTemplateColumns="1fr auto" gap="small" alignItems="center">
-                                <span style={{ display: "inline-flex", alignItems: "center", gap: ".4rem" }}>
-                                  {!sel && <s-icon type="link" />}
-                                  {sel ? `${sel.label} (${String(sel.protocol).toUpperCase()})` : "URL"}
-                                </span>
-                                <s-icon type="select" />
-                              </s-grid>
-                            );
-                          })()}
-                        </s-clickable>
-                      </div>
-                      <s-popover id="deliver-popover" {...widthProps(Math.max(deliverTriggerWidth, 240))}>
-                        <s-box padding="small-200">
-                          <s-stack direction="block" gap="small-300">
-                            {/* URL = ad-hoc destination typed in the field beside;
-                                credentials ride in the URL, nothing is saved. */}
-                            <PickerRow
-                              icon={<s-icon type="link" />}
-                              label="URL"
-                              selected={!deliverTarget}
-                              onSelect={() => setDeliverTarget("")}
-                              popoverId="deliver-popover"
-                            />
-                            {/* Navigates — adding a server lives on its own page. */}
-                            <s-clickable
-                              onClick={() => { setAddingServer(true); navigate("/app/servers"); }}
-                              padding="small-200"
-                              borderRadius="base"
-                            >
-                              <s-grid gridTemplateColumns="auto 1fr" gap="small-200" alignItems="center">
-                                <span style={checkSlot}>
-                                  {addingServer
-                                    ? <s-spinner size="small" accessibilityLabel="Opening Servers" />
-                                    : <s-icon type="plus" />}
-                                </span>
-                                <span style={{ display: "inline-flex", alignItems: "center", gap: ".35rem" }}>
-                                  Add a new server
-                                  {/* External glyph: this row navigates to the Servers page. */}
-                                  <s-icon type="external" />
-                                </span>
-                              </s-grid>
-                            </s-clickable>
-                            <s-text color="subdued">Saved servers</s-text>
-                            {servers.filter((s) => s.protocol !== "https").length === 0 && (
-                              <s-text color="subdued">No saved servers yet.</s-text>
-                            )}
-                            {servers.filter((s) => s.protocol !== "https").map((s) => (
-                              <PickerRow
-                                key={s.id}
-                                label={`${s.label} (${String(s.protocol).toUpperCase()})`}
-                                selected={deliverTarget === s.id}
-                                // Fill the field with the server's URL (username
-                                // included; the stored password is injected
-                                // server-side at send — it never reaches the
-                                // browser). Append a folder to taste.
-                                onSelect={() => { setDeliverTarget(s.id); setDeliverUrl(buildRemoteUrl(s, "")); }}
-                                popoverId="deliver-popover"
-                              />
-                            ))}
-                          </s-stack>
-                        </s-box>
-                      </s-popover>
-                      <SharedTextField
-                        label="Destination URL"
-                        labelAccessibilityVisibility="exclusive"
-                        placeholder="ftp://user:pass@host/folder — also ftps://, sftp://"
-                        value={deliverUrl}
-                        onChange={setDeliverUrl}
-                      />
-                      <s-button
-                        disabled={
-                          delivering
-                          || (!deliverTarget && !/^(ftp|ftps|sftp):\/\/[^\s/]+/i.test(deliverUrl.trim()))
-                            ? true : undefined
-                        }
-                        loading={delivering ? true : undefined}
-                        onClick={() =>
-                          deliverFetcher.submit({
-                            intent: "deliver",
-                            filename: mainFile.name,
-                            target: deliverTarget || "url",
-                            url: deliverUrl.trim(),
-                            // Saved-server sends keep their stored credentials;
-                            // only the folder is taken from the typed URL.
-                            path: (() => { try { return new URL(deliverUrl).pathname; } catch { return ""; } })(),
-                          }, { method: "post" })
-                        }
-                      >
-                        Send
-                      </s-button>
-                    </s-grid>
-                    <s-text color="subdued">
-                      Push the finished file to a saved FTP/SFTP/S3 server.
-                    </s-text>
-                  </div>
+          {/* PDFs open in a viewer tab; other formats download in place. */}
+          <div style={{ marginTop: ".4rem" }}>
+            <s-button
+              variant="primary"
+              icon="download"
+              href={mainFile.url}
+              target={/\.pdf$/i.test(mainFile.name) ? "_blank" : undefined}
+            >
+              Download
+            </s-button>
+          </div>
+
+          {/* On-demand delivery, right in the banner. */}
+          <PrefetchPageLinks page="/app/servers" />
+          <div style={{ marginTop: "2rem" }}>
+            <span style={deliverLabel}>Deliver to</span>
+            <div style={fieldHelpWrap}>
+              <s-grid gridTemplateColumns="auto 1fr auto" gap="small-200" alignItems="center">
+                <div ref={deliverTriggerRef} style={{ minWidth: 180 }}>
+                  <s-clickable
+                    command="--toggle"
+                    commandFor="deliver-popover"
+                    inlineSize="100%"
+                    borderWidth="base"
+                    borderStyle="solid"
+                    borderColor="strong"
+                    borderRadius="base"
+                    paddingInline="small-100"
+                    blockSize="32px"
+                    background="base"
+                  >
+                    {(() => {
+                      const sel = servers.find((s) => s.id === deliverTarget);
+                      return (
+                        <s-grid gridTemplateColumns="1fr auto" gap="small" alignItems="center">
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: ".4rem" }}>
+                            {!sel && <s-icon type="link" />}
+                            {sel ? `${sel.label} (${String(sel.protocol).toUpperCase()})` : "URL"}
+                          </span>
+                          <s-icon type="select" />
+                        </s-grid>
+                      );
+                    })()}
+                  </s-clickable>
                 </div>
-                {deliverFetcher.data?.delivered && (
-                  <s-banner tone="success" dismissible>{deliverFetcher.data.delivered}</s-banner>
-                )}
-                {deliverFetcher.data?.deliverError && (
-                  <s-banner tone="critical" dismissible>{deliverFetcher.data.deliverError}</s-banner>
-                )}
-              </>
-            )}
+                <s-popover id="deliver-popover" {...widthProps(Math.max(deliverTriggerWidth, 240))}>
+                  <s-box padding="small-200">
+                    <s-stack direction="block" gap="small-300">
+                      {/* URL = ad-hoc destination typed in the field beside;
+                          credentials ride in the URL, nothing is saved. */}
+                      <PickerRow
+                        icon={<s-icon type="link" />}
+                        label="URL"
+                        selected={!deliverTarget}
+                        onSelect={() => {
+                          setDeliverTarget("");
+                          setDeliverUrl(typedDeliverUrl.current);
+                        }}
+                        popoverId="deliver-popover"
+                      />
+                      {/* Navigates — adding a server lives on its own page. */}
+                      <s-clickable
+                        onClick={() => { setAddingServer(true); navigate("/app/servers"); }}
+                        padding="small-200"
+                        borderRadius="base"
+                      >
+                        <s-grid gridTemplateColumns="auto 1fr" gap="small-200" alignItems="center">
+                          <span style={checkSlot}>
+                            {addingServer
+                              ? <s-spinner size="small" accessibilityLabel="Opening Servers" />
+                              : <s-icon type="plus" />}
+                          </span>
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: ".35rem" }}>
+                            Add a new server
+                            {/* External glyph: this row navigates to the Servers page. */}
+                            <s-icon type="external" />
+                          </span>
+                        </s-grid>
+                      </s-clickable>
+                      <s-text color="subdued">Saved servers</s-text>
+                      {servers.filter((s) => s.protocol !== "https").length === 0 && (
+                        <s-text color="subdued">No saved servers yet.</s-text>
+                      )}
+                      {servers.filter((s) => s.protocol !== "https").map((s) => (
+                        <PickerRow
+                          key={s.id}
+                          label={`${s.label} (${String(s.protocol).toUpperCase()})`}
+                          selected={deliverTarget === s.id}
+                          // Fill the field with the server's URL (username
+                          // included; the stored password is injected
+                          // server-side at send — it never reaches the
+                          // browser). Append a folder to taste.
+                          onSelect={() => {
+                            // Leaving URL mode: keep what was typed so
+                            // switching back restores it.
+                            if (!deliverTarget) typedDeliverUrl.current = deliverUrl;
+                            setDeliverTarget(s.id);
+                            setDeliverUrl(buildRemoteUrl(s, ""));
+                          }}
+                          popoverId="deliver-popover"
+                        />
+                      ))}
+                    </s-stack>
+                  </s-box>
+                </s-popover>
+                <SharedTextField
+                  label="Destination URL"
+                  labelAccessibilityVisibility="exclusive"
+                  placeholder="ftp://user:pass@host/folder — also ftps://, sftp://"
+                  value={deliverUrl}
+                  onChange={setDeliverUrl}
+                />
+                <s-button
+                  disabled={
+                    delivering
+                    || (!deliverTarget && !/^(ftp|ftps|sftp):\/\/[^\s/]+/i.test(deliverUrl.trim()))
+                      ? true : undefined
+                  }
+                  loading={delivering ? true : undefined}
+                  onClick={() =>
+                    deliverFetcher.submit({
+                      intent: "deliver",
+                      filename: mainFile.name,
+                      target: deliverTarget || "url",
+                      url: deliverUrl.trim(),
+                      // Saved-server sends keep their stored credentials;
+                      // only the folder is taken from the typed URL.
+                      path: (() => { try { return new URL(deliverUrl).pathname; } catch { return ""; } })(),
+                    }, { method: "post" })
+                  }
+                >
+                  Send
+                </s-button>
+              </s-grid>
+              <s-text color="subdued">
+                Push the finished file to a saved FTP/SFTP/S3 server.
+              </s-text>
+            </div>
+          </div>
+        </s-banner>
+        {deliverFetcher.data?.delivered && (
+          <s-banner tone="success" dismissible>{deliverFetcher.data.delivered}</s-banner>
+        )}
+        {deliverFetcher.data?.deliverError && (
+          <s-banner tone="critical" dismissible>{deliverFetcher.data.deliverError}</s-banner>
+        )}
+        </>
+      )}
+
+
+      {/* ── Import files (source, result workbook) as plain rows. ── */}
+      {files.length > 0 && !finishing && job.kind === "import" && (
+        <s-section heading="Files">
+          <s-stack direction="block" gap="base">
+            {files.map((f) => (
+              <s-grid key={f.name} gridTemplateColumns="1fr auto" gap="base" alignItems="center">
+                <span style={{ fontWeight: 600 }}>{f.name}</span>
+                <s-button
+                  variant={f.main ? "primary" : "secondary"}
+                  icon="download"
+                  href={f.url}
+                  target={/\.pdf$/i.test(f.name) ? "_blank" : undefined}
+                >
+                  Download
+                </s-button>
+              </s-grid>
+            ))}
           </s-stack>
         </s-section>
       )}
@@ -885,7 +916,7 @@ export default function JobPage() {
           {/* ── Run facts ── */}
           <s-grid gridTemplateColumns="repeat(auto-fit, minmax(150px, 1fr))" gap="base">
             <Fact label="ID">{job.number != null ? `#${job.number}` : "—"}</Fact>
-            <Fact label="Format">{FORMAT_LABELS[job.format] ?? String(job.format).toUpperCase()}</Fact>
+            {/* Format lives in the status-row badge above, not here. */}
             {/* Exports list their sheets in the dedicated Sheets card below. */}
             {job.kind === "import" && <Fact label="File">{job.filename ?? "—"}</Fact>}
             <Fact label="Started">{dateTime(job.createdAt, timezone)}</Fact>
@@ -1251,6 +1282,14 @@ const titleCase = (s) => String(s ?? "").split(",").map((slug) => {
   return name ? name.charAt(0).toUpperCase() + name.slice(1) : "";
 }).filter(Boolean).join(", ");
 
+/** Bytes → "11.2 kB" / "3.4 MB" — human-readable file size. */
+function humanSize(bytes) {
+  if (!Number.isFinite(bytes)) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} kB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function dateTime(isoStr, tz = "UTC") {
   if (!isoStr) return "—";
   return new Date(isoStr).toLocaleString(undefined, {
@@ -1271,34 +1310,13 @@ function duration(start, end) {
 
 // ─── styles ───────────────────────────────────────────────────────────────────
 
-// The "file is ready" success box: bordered green card with a bold title and
-// a primary download button, rather than a plain banner.
-const downloadBox = {
-  border: "1px solid #a6e0bf",
-  background: "#f0faf5",
-  borderRadius: 12,
-  padding: "1.15rem 1.35rem",
-  display: "flex",
-  flexDirection: "column",
-  gap: ".7rem",
-};
-const downloadHead = {
-  display: "flex", alignItems: "center", gap: ".5rem",
-};
-// s-icon maxes out at the "base" size token, so scale it up a touch visually.
-const downloadCheck = {
-  display: "inline-flex", transform: "scale(1.35)", transformOrigin: "center",
-};
-const downloadTitle = {
-  fontSize: "1.2rem", fontWeight: 700, color: "#0c5132", lineHeight: 1.2,
-};
 const downloadFileRow = {
   display: "flex", alignItems: "center", gap: ".4rem", flexWrap: "wrap",
 };
 // The filename set apart from the surrounding text: monospace, bold, dark.
 const downloadFile = {
   fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
-  fontWeight: 600, fontSize: ".9rem", color: "#202223",
+  fontWeight: 400, fontSize: ".9rem", color: "#202223",
   wordBreak: "break-all",
 };
 

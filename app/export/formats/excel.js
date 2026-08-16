@@ -57,14 +57,22 @@ export function toExcelWorkbook(sheets) {
   ]);
 }
 
+/** "product_media" → "Product media" — an entity slug as a sheet title. */
+export function entitySheetName(entity) {
+  const words = String(entity ?? "").split("_").filter(Boolean).join(" ");
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : "Export";
+}
+
 /**
  * Build a single-sheet workbook from flat rows + optional column order.
+ * The sheet is named after the exported entity ("Products"), not "Export".
  * @param {object[]} rows
  * @param {string[]} [columns]
+ * @param {string} [entity]
  * @returns {Buffer}
  */
-export function toExcel(rows, columns) {
-  return toExcelWorkbook([{ name: "Export", rows, columns }]);
+export function toExcel(rows, columns, entity) {
+  return toExcelWorkbook([{ name: entitySheetName(entity), rows, columns }]);
 }
 
 // ─── workbook-level XML ──────────────────────────────────────────────────────

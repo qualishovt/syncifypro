@@ -20,7 +20,7 @@ import { nextJobNumber } from "./jobNumber.server.js";
  */
 export async function createImportJob({
   shop, entity, format, filename = null, sourceR2Key, progressTotal = null,
-  plan = null, options = null,
+  plan = null, options = null, status = "pending",
 }) {
   // Assign the shared per-shop job number + create in one transaction.
   return db.$transaction(async (tx) => {
@@ -28,13 +28,49 @@ export async function createImportJob({
     return tx.bulkImportJob.create({
       data: {
         shop, entity, format, filename, sourceR2Key, number,
-        status: "pending",
+        status,
         progressCurrent: 0,
         progressTotal,
         plan: plan == null ? null : JSON.stringify(plan),
         options: options == null ? null : JSON.stringify(options),
       },
     });
+  });
+}
+
+/**
+ * The staged file's job row, created at upload in "ready" status so the
+ * import preview carries its job number (like the export run does) before
+ * anything runs. Import later ARMS this same row instead of creating a new
+ * one, so the number the merchant saw is the number the run gets.
+ */
+export async function createReadyImportJob({ shop, format, filename, sourceR2Key }) {
+  return createImportJob({
+    shop, entity: "", format, filename, sourceR2Key, status: "ready",
+  });
+}
+
+/**
+ * Turn a "ready" preview row into a queued run: fill in what the analysis
+ * decided (entities, plan, options, progress total) and mark it pending.
+ * Returns null if the row isn't this shop's ready job (caller then creates
+ * a fresh one — e.g. the row was already imported once).
+ */
+export async function armReadyImportJob({ id, shop, entity, format, filename, progressTotal, plan, options }) {
+  const row = await db.bulkImportJob.findUnique({ where: { id } });
+  if (!row || row.shop !== shop || row.status !== "ready") return null;
+  return db.bulkImportJob.update({
+    where: { id },
+    data: {
+      entity, format, filename,
+      status: "pending",
+      progressCurrent: 0,
+      progressTotal,
+      plan: plan == null ? null : JSON.stringify(plan),
+      options: options == null ? null : JSON.stringify(options),
+      // The run starts NOW — createdAt is "Started" on the info card.
+      createdAt: new Date(),
+    },
   });
 }
 

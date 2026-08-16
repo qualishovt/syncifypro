@@ -30,7 +30,7 @@ export function widthProps(w) {
 }
 
 // Reserved left column in picker rows so the checkmark aligns all labels.
-const checkSlot = {
+export const checkSlot = {
   width: 20, display: "inline-flex", alignItems: "center", justifyContent: "center",
 };
 

@@ -32,7 +32,8 @@ const IMPORT_MODE_CHOICES = [
   { value: "normal", label: "Normal — follow the Command column" },
   { value: "updateOnly", label: "Update only — skip new records" },
   { value: "createOnly", label: "Create only — skip existing records" },
-  { value: "noDelete", label: "Don’t delete — ignore delete rows" },
+  { value: "noDelete", label: "Add new and update existing — ignore delete rows" },
+  { value: "forceCreate", label: "Create even if exists (may cause duplicates)" },
   { value: "dryRun", label: "Dry run — validate, write nothing" },
 ];
 // A curated set of common IANA zones (JS Intl handles the offset/DST math).
@@ -67,7 +68,7 @@ const MENU_GROUPS = [
 
 const IMPORT_MODE_LABELS = {
   normal: "Normal", updateOnly: "Update only", createOnly: "Create only",
-  noDelete: "No delete", dryRun: "Dry run",
+  noDelete: "Add and update", forceCreate: "Create even if exists", dryRun: "Dry run",
 };
 
 // The one-line current-value shown under each menu item.

@@ -13,6 +13,7 @@ import { detectEntity, entityFromSheetName } from "./detect.js";
 import { isEntityBlocked } from "../export/fieldLists.js";
 import { summarizeIntent, classifyRecord, identityKeys } from "./intent.js";
 import { groupRecords, topRow } from "./assemble.js";
+import { activeAdvancedFilters, matchesAdvancedFilters } from "../export/advancedFilters.js";
 import { validateProductRows } from "./validators/products.js";
 import { validateOrderRows } from "./validators/orders.js";
 import { validateCustomerRows } from "./validators/customers.js";
@@ -201,6 +202,11 @@ export function analyzeSheet({ rawRows, name = null, entity = "auto", include = 
     entity: resolvedEntity,
     detection,
     parsed:  allRows.length,
+    // Records, not rows — a product's variant/image rows collapse into one.
+    records: groupRecords(rows).length,
+    // Valid RECORDS — the unit the writers report progress in, so a job's
+    // progress total counts the same thing as its progress current.
+    validRecords: groupRecords(valid).length,
     filteredOut: allRows.length - rows.length,
     valid:   valid.length,
     invalid: validationErrors.length,
@@ -219,23 +225,15 @@ function safeReverseMap(entity) {
   try { return reverseHeaderMap(entity); } catch { return new Map(); }
 }
 
-/** True if a record's top row satisfies every active filter (AND). */
-function matchesFilters(top, filters) {
-  return filters.every((f) => {
-    const cell = String(top[f.column] ?? "").trim().toLowerCase();
-    const val = String(f.value ?? "").trim().toLowerCase();
-    switch (f.operator) {
-      case "is_empty":     return cell === "";
-      case "is_not_empty": return cell !== "";
-      case "equals":       return cell === val;
-      case "not_equal":    return cell !== val;
-      case "contains":     return cell.includes(val);
-      case "not_contains": return !cell.includes(val);
-      case "starts_with":  return cell.startsWith(val);
-      default:             return true;
-    }
-  });
-}
+// Operator names from plans saved before row filters adopted the export
+// page's operator set — mapped onto their "any of" equivalents.
+const LEGACY_FILTER_OPS = {
+  equals: "equals_any",
+  not_equal: "not_equal_any",
+  contains: "contains_any",
+  not_contains: "contains_none",
+  starts_with: "starts_with_any",
+};
 
 // Keys that must survive column selection regardless of the merchant's choice:
 // the Command drives create/update/delete, top_row assembles variant groups.
@@ -256,13 +254,17 @@ function selectColumns(rows, entity, columns) {
   });
 }
 
-/** Keep only records (groups) whose top row matches the active row filters. */
+/**
+ * Keep only records (groups) whose top row matches the active row filters.
+ * Matching is the export page's advanced-filter semantics (shared module):
+ * case-insensitive, comma-separated "any of" value lists, GID tail matching.
+ */
 function applyRowFilters(rows, filters) {
-  const active = (filters ?? []).filter((f) =>
-    f.column && f.operator &&
-    (f.operator === "is_empty" || f.operator === "is_not_empty" || String(f.value ?? "").trim() !== ""));
+  const mapped = (filters ?? []).map((f) =>
+    f && LEGACY_FILTER_OPS[f.operator] ? { ...f, operator: LEGACY_FILTER_OPS[f.operator] } : f);
+  const active = activeAdvancedFilters(mapped);
   if (!active.length) return rows;
-  return groupRecords(rows).filter((g) => matchesFilters(topRow(g), active)).flat();
+  return groupRecords(rows).filter((g) => matchesAdvancedFilters(topRow(g), active)).flat();
 }
 
 /**
@@ -307,7 +309,9 @@ export function analyzeWorkbook({ fileBuffer, format, entity = "auto", plan = nu
       });
     });
 
-  const totals = { parsed: 0, valid: 0, invalid: 0, create: 0, update: 0, delete: 0, skip: 0, importable: 0 };
+  // `importable` counts valid ROWS (what the preview shows as "N rows ready");
+  // `importableRecords` counts valid RECORDS — the writers' progress unit.
+  const totals = { parsed: 0, valid: 0, invalid: 0, create: 0, update: 0, delete: 0, skip: 0, importable: 0, importableRecords: 0 };
   for (const s of sheets) {
     totals.parsed += s.parsed ?? 0;
     totals.valid += s.valid ?? 0;
@@ -318,6 +322,7 @@ export function analyzeWorkbook({ fileBuffer, format, entity = "auto", plan = nu
       totals.delete += s.intent.delete;
       totals.skip += s.intent.skip;
       totals.importable += s.valid;
+      totals.importableRecords += s.validRecords ?? s.valid;
     }
   }
 
@@ -365,11 +370,35 @@ export async function applyImport({ validRows, entity, admin, onProgress, option
   }
 
   if (rows.length === 0) return { created: 0, updated: 0, deleted: 0, errors: [] };
-  return writer(rows, admin, { onProgress });
+  // Writers get the full options object (behavior checkboxes like
+  // createRedirects) alongside the progress callback.
+  return writer(rows, admin, { onProgress, options });
 }
+
+// Identity keys that are also real data — kept even when force-creating, so
+// the write attempts loudly fail on true duplicates (email, redirect path)
+// instead of silently dropping the value.
+const FORCE_CREATE_KEEPS = new Set(["email", "path"]);
 
 /** Keep only the records an import mode should write; returns flat rows. */
 function filterRecordsByMode(validRows, entity, mode) {
+  // "Import everything even if exists": drop deletes, then strip the
+  // identifiers from every surviving record so it takes the create path —
+  // the writers can't match an existing item they can't identify.
+  if (mode === "forceCreate") {
+    const strip = identityKeys(entity).filter((k) => !FORCE_CREATE_KEEPS.has(k));
+    return groupRecords(validRows)
+      .filter((g) => classifyRecord(topRow(g), entity) !== "delete")
+      .flat()
+      .map((r) => {
+        const out = { ...r };
+        for (const k of strip) delete out[k];
+        // UPDATE/REPLACE/MERGE commands would still steer writers toward
+        // matching — force them to NEW.
+        if (String(out.command ?? "").trim()) out.command = "NEW";
+        return out;
+      });
+  }
   if (mode !== "noDelete" && mode !== "createOnly" && mode !== "updateOnly") return validRows;
   const groups = groupRecords(validRows).filter((g) => {
     const cls = classifyRecord(topRow(g), entity);

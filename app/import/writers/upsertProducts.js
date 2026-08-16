@@ -46,6 +46,18 @@ const PRODUCT_BY_IDENTIFIER = `#graphql
   }
 `;
 
+const PRODUCT_HANDLE = `#graphql
+  query ProductHandle($id: ID!) { product(id: $id) { handle } }
+`;
+const REDIRECT_CREATE = `#graphql
+  mutation RedirectCreate($redirect: UrlRedirectInput!) {
+    urlRedirectCreate(urlRedirect: $redirect) {
+      urlRedirect { id }
+      userErrors { field message }
+    }
+  }
+`;
+
 const LOCATIONS = `#graphql
   query Locations { locations(first: 250, includeInactive: true) { nodes { id name } } }
 `;
@@ -70,9 +82,9 @@ const UNPUBLISH = `#graphql
  * @param {import("@shopify/shopify-app-react-router/server").AdminApiContext} admin
  * @returns {Promise<{ created: number, updated: number, deleted: number, skipped: number, errors: object[] }>}
  */
-export async function upsertProducts(rows, admin, { onProgress } = {}) {
+export async function upsertProducts(rows, admin, { onProgress, options = {} } = {}) {
   const groups = groupRecords(rows);
-  const ctx = new WriteContext(admin);
+  const ctx = new WriteContext(admin, options);
   const result = { created: 0, updated: 0, deleted: 0, skipped: 0, errors: [], results: new Array(groups.length) };
 
   let base = 0;
@@ -118,6 +130,13 @@ async function writeGroup(group, ctx, result) {
     }
 
     const existedBefore = Boolean(identifier);
+    // "Generate redirects if handles change": a handle can only CHANGE when the
+    // match is by id and the file supplies a handle — read the current handle
+    // before the write so the old address is still known afterwards.
+    let priorHandle = null;
+    if (ctx.createRedirects && identifier?.id && input.handle) {
+      priorHandle = await fetchHandle(identifier.id, admin);
+    }
     const res = await admin.graphql(PRODUCT_SET, { variables: { input, identifier } });
     const payload = (await res.json())?.data?.productSet;
     const errs = payload?.userErrors ?? [];
@@ -127,6 +146,7 @@ async function writeGroup(group, ctx, result) {
     existedBefore ? result.updated++ : result.created++;
 
     // Follow-up passes (best-effort; failures are reported, not fatal).
+    await applyRedirectPass(priorHandle, product, ctx, result, label);
     await applyInventoryPass(group, product, ctx, result, label);
     await applyPublicationPass(group, product, ctx, result, label);
     return { status: existedBefore ? "updated" : "created", comment: "" };
@@ -139,6 +159,21 @@ async function writeGroup(group, ctx, result) {
 /** Join userError messages into one comment string. */
 function msgs(errs) {
   return errs.map((e) => e.message).filter(Boolean).join("; ");
+}
+
+/**
+ * The update changed the product's handle → the old product URL now 404s.
+ * Create a redirect from the old address to the new one so links keep working.
+ * A pre-existing redirect on that path just reports its userError (best-effort).
+ */
+async function applyRedirectPass(priorHandle, product, ctx, result, label) {
+  const newHandle = product?.handle;
+  if (!priorHandle || !newHandle || priorHandle === newHandle) return;
+  const res = await ctx.admin.graphql(REDIRECT_CREATE, {
+    variables: { redirect: { path: `/products/${priorHandle}`, target: `/products/${newHandle}` } },
+  });
+  const errs = (await res.json())?.data?.urlRedirectCreate?.userErrors ?? [];
+  for (const e of errs) result.errors.push({ title: label, field: e.field, message: `Redirect: ${e.message}` });
 }
 
 async function applyInventoryPass(group, product, ctx, result, label) {
@@ -181,6 +216,16 @@ async function deleteProduct(id, admin) {
   return (await res.json())?.data?.productDelete?.userErrors ?? [];
 }
 
+/** Current handle of a product by id — null when it doesn't exist. */
+async function fetchHandle(id, admin) {
+  try {
+    const res = await admin.graphql(PRODUCT_HANDLE, { variables: { id } });
+    return (await res.json())?.data?.product?.handle ?? null;
+  } catch {
+    return null; // best-effort — no redirect is better than a failed import
+  }
+}
+
 async function resolveId(identifier, admin) {
   if (!identifier) return null;
   if (identifier.id) return identifier.id;
@@ -195,8 +240,9 @@ async function resolveId(identifier, admin) {
  * each fetched at most once and reused across every product.
  */
 class WriteContext {
-  constructor(admin) {
+  constructor(admin, options = {}) {
     this.admin = admin;
+    this.createRedirects = Boolean(options.createRedirects);
     this._locations = null;
     this._pubId = undefined;
   }

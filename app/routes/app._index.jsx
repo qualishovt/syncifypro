@@ -124,7 +124,18 @@ async function stageAndRedirect({ shop, buffer, filename, mimeType }) {
   const safeName = String(filename).replace(/[^\w.-]+/g, "_");
   const key = `imports/${shop}/${stamp}-${safeName}`;
   await putToR2({ buffer, key, mimeType });
-  return redirect(`/app/import?src=${encodeURIComponent(key)}&name=${encodeURIComponent(filename)}`);
+  // The preview gets its job number up front (like an export run): a
+  // "ready" job row that Import later arms. Best-effort — the preview still
+  // works without one, it just shows the number after Import instead.
+  let jobParam = "";
+  try {
+    const { createReadyImportJob } = await import("../db/bulkImportJob.server.js");
+    const ext = String(filename).toLowerCase().split(".").pop();
+    const format = ext === "csv" ? "csv" : ext === "zip" ? "zip" : "xlsx";
+    const ready = await createReadyImportJob({ shop, format, filename, sourceR2Key: key });
+    jobParam = `&job=${encodeURIComponent(ready.id)}`;
+  } catch { /* the number is a nicety, not a requirement */ }
+  return redirect(`/app/import?src=${encodeURIComponent(key)}&name=${encodeURIComponent(filename)}${jobParam}`);
 }
 
 // Re-run a past export from its stored spec (entities + filters + columns).
@@ -550,8 +561,8 @@ export default function Home() {
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
-const STATUS_TONE = { complete: "success", failed: "critical", running: "info", pending: "info", cancelled: "warning" };
-const STATUS_LABEL = { complete: "Complete", failed: "Failed", running: "Running", pending: "Queued", cancelled: "Cancelled" };
+const STATUS_TONE = { complete: "success", failed: "critical", running: "info", pending: "info", ready: "attention", cancelled: "warning" };
+const STATUS_LABEL = { complete: "Complete", failed: "Failed", running: "Running", pending: "Queued", ready: "Ready to import", cancelled: "Cancelled" };
 
 // Status label + tone. A *completed* import can still have per-record failures
 // (the job "finished" but records errored) — so reflect that instead of a plain

@@ -22,6 +22,7 @@ import {
   PutObjectCommand,
   GetObjectCommand,
   DeleteObjectCommand,
+  HeadObjectCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
@@ -209,6 +210,22 @@ export async function signDownloadUrl(r2Key, filename) {
     { expiresIn: SIGNED_URL_EXPIRY_SECONDS },
   );
   return { signedUrl, expiresAt: new Date(Date.now() + SIGNED_URL_EXPIRY_SECONDS * 1000) };
+}
+
+/**
+ * Size of a stored object in bytes, or null when it can't be read.
+ * @param {string} r2Key
+ * @returns {Promise<number|null>}
+ */
+export async function getObjectSize(r2Key) {
+  try {
+    const bucket = process.env.R2_BUCKET_NAME;
+    if (!bucket) return null;
+    const res = await getR2Client().send(new HeadObjectCommand({ Bucket: bucket, Key: r2Key }));
+    return Number.isFinite(res.ContentLength) ? res.ContentLength : null;
+  } catch {
+    return null;
+  }
 }
 
 /**

@@ -8,9 +8,10 @@
 // Export = data leaving the store — green upload-from-tray arrow. A plain SVG
 // (not s-icon) so it sizes with its context exactly like ImportIcon; #008060
 // is Shopify's success green.
-export function ExportIcon() {
+/* eslint-disable react/prop-types */
+export function ExportIcon({ color }) {
   return (
-    <svg viewBox="0 0 24 24" style={{ width: "1em", height: "1em" }} fill="none" stroke="#008060" strokeWidth="2"
+    <svg viewBox="0 0 24 24" style={{ width: "1em", height: "1em" }} fill="none" stroke={color ?? "#008060"} strokeWidth="2"
       strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
       <polyline points="7 8 12 3 17 8" />
@@ -20,9 +21,10 @@ export function ExportIcon() {
 }
 
 // Import = data coming into the store — blue download-into-tray arrow.
-export function ImportIcon() {
+// `color` overrides the brand blue (e.g. "currentColor" inside a primary button).
+export function ImportIcon({ color }) {
   return (
-    <svg viewBox="0 0 24 24" style={{ width: "1em", height: "1em" }} fill="none" stroke="#2c6ecb" strokeWidth="2"
+    <svg viewBox="0 0 24 24" style={{ width: "1em", height: "1em" }} fill="none" stroke={color ?? "#2c6ecb"} strokeWidth="2"
       strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
       <polyline points="7 10 12 15 17 10" />
@@ -30,3 +32,4 @@ export function ImportIcon() {
     </svg>
   );
 }
+/* eslint-enable react/prop-types */

@@ -29,6 +29,8 @@ import { FIELDS_BY_ENTITY, PRODUCT_FIELDS, COLUMN_GROUPS_BY_ENTITY, FIELD_LABELS
 import { buildInventoryFieldKeys } from "../export/inventoryColumns.js";
 import { buildMetafieldFieldKeys, PRODUCT_MF_PREFIX, VARIANT_MF_PREFIX } from "../export/metafieldColumns.js";
 import { buildCatalogFieldKeys } from "../export/catalogColumns.js";
+import { ENTITIES, ENTITY_ICONS, entityDisplayName } from "../export/entityMeta.js";
+import { buildRemoteUrl } from "../import/urlSource.js";
 // Shared web-component bridges (this route also has LOCAL PolarisSelect/
 // PolarisTextField helpers with different signatures — hence the aliases).
 import SharedTextField from "../components/PolarisTextField.jsx";
@@ -726,7 +728,6 @@ export async function action({ request }) {
 // 32 entities — a full 4-per-row grid (8 rows). NB: subscription contracts
 // are deliberately absent — reading them needs a scope Shopify only grants
 // to approved subscription apps (the extractor is ready if that changes).
-const ENTITIES = ["products", "orders", "customers", "collections", "smart_collections", "custom_collections", "discounts", "content", "articles", "draft_orders", "gift_cards", "redirects", "product_media", "inventory", "selling_plans", "metafields", "segments", "store_credit", "markets", "delivery_profiles", "shop", "files", "payouts", "menus", "companies", "locations", "catalogs", "inventory_transfers", "activity", "metaobjects", "definitions", "translations"];
 const FORMATS = ["excel", "csv", "xml", "json", "pdf", "csv_shopify", "google_feed"];
 // Units, counts and run limits for the inline scheduler. The "Repeat every"
 // checkbox arms the row; unchecked = one-shot schedule.
@@ -842,45 +843,6 @@ const VALUELESS_OPERATORS = new Set(["is_empty", "is_not_empty"]);
 // Built-in presets, always shown above the user's saved exports.
 const PRESET_BUILTIN = ["Latest Export", "New Export"];
 
-// Polaris s-icon type per entity.
-const ENTITY_ICONS = {
-  products: "product",
-  orders: "order",
-  customers: "person",
-  collections: "collection",
-  smart_collections: "collection",
-  custom_collections: "collection",
-  discounts: "discount",
-  pages: "page",
-  blogs: "blog",
-  articles: "note",
-  redirects: "link",
-  shop: "store",
-  files: "image",
-  payouts: "bank",
-  menus: "menu",
-  companies: "store-managed",
-  draft_orders: "order-draft",
-  gift_cards: "gift-card",
-  inventory: "inventory",
-  selling_plans: "calendar",
-  markets: "globe",
-  delivery_profiles: "delivery",
-  segments: "person-segment",
-  subscriptions: "calendar-time",
-  store_credit: "wallet",
-  product_media: "image",
-  activity: "clock",
-  metaobjects: "database",
-  metaobject_definitions: "database",
-  metafields: "metafields",
-  translations: "language-translate",
-  locations: "location",
-  catalogs: "collection-list",
-  inventory_transfers: "transfer-in",
-  content: "page",
-  definitions: "data-table",
-};
 
 export default function ExportPage() {
   const loaderData = useLoaderData();
@@ -971,6 +933,16 @@ export default function ExportPage() {
   const [advSkipEmpty, setAdvSkipEmpty] = useState(false);
   const [advZip, setAdvZip] = useState(false);
   const [advEmailTo, setAdvEmailTo] = useState("");
+  // Post-run delivery — the run page's "Deliver to" picker, chosen up-front:
+  // "" = ad-hoc URL mode (no delivery while the URL stays empty).
+  const [advDeliverTarget, setAdvDeliverTarget] = useState("");
+  const [advDeliverUrl, setAdvDeliverUrl] = useState("");
+  // What the user last TYPED in URL mode — picking a saved server overwrites
+  // the field with the server's URL, so switching back restores this.
+  const typedDeliverUrl = useRef("");
+  const [addingServer, setAddingServer] = useState(false);
+  const [deliverTriggerRef, deliverTriggerWidth] = useElementWidth();
+  const savedServers = loaderData.servers ?? [];
   // Formatting (Matrixify parity): date rendering + the Excel-safety apostrophe
   // (a select of WHICH values get prefixed, like Matrixify's).
   const [advExcelDates, setAdvExcelDates] = useState(false);
@@ -1242,7 +1214,9 @@ export default function ExportPage() {
     const name = presetName.trim();
     if (!name) return;
     const spec = buildSpecs();
+    // Ad-hoc URL credentials must never persist — presets keep the rest.
     const options = buildAdvancedOptions();
+    delete options.deliverUrl;
     presetFetcher.submit(
       {
         intent: "savePreset", name, format,
@@ -1270,6 +1244,13 @@ export default function ExportPage() {
       skipEmpty: advSkipEmpty,
       zip: advZip,
       emailTo: advEmailTo.trim() || null,
+      deliverTarget: advDeliverTarget || null,
+      // Ad-hoc URL (credentials ride in it) only without a saved server; with
+      // one, just the typed folder rides along — the password stays stored.
+      deliverUrl: !advDeliverTarget && advDeliverUrl.trim() ? advDeliverUrl.trim() : null,
+      deliverPath: advDeliverTarget
+        ? (() => { try { return new URL(advDeliverUrl).pathname; } catch { return null; } })()
+        : null,
       excelDates: advExcelDates,
       dateFormat: advDateFormat || null,
       apostrophe: advApostrophe || null,
@@ -1298,6 +1279,8 @@ export default function ExportPage() {
     setAdvZip(Boolean(o.zip));
     setAdvSkipEmpty(Boolean(o.skipEmpty));
     setAdvEmailTo(o.emailTo ?? "");
+    setAdvDeliverTarget(o.deliverTarget ?? "");
+    setAdvDeliverUrl(o.deliverUrl ?? "");
     setAdvExcelDates(Boolean(o.excelDates));
     setAdvDateFormat(o.dateFormat ?? "");
     setAdvApostrophe(o.apostrophe === true ? "all" : (o.apostrophe || ""));
@@ -1325,13 +1308,16 @@ export default function ExportPage() {
     // A missing date comes back as a validation error from the action.
     if (schedOnEnabled) {
       const splitParsed = parseInt(splitRows.trim(), 10);
+      // Ad-hoc URL credentials must never persist on a schedule row.
+      const schedOptions = buildAdvancedOptions();
+      delete schedOptions.deliverUrl;
       schedFetcher.submit({
         intent: "createInlineSchedule",
         payload: JSON.stringify({
           format,
           specs: buildSpecs(),
           splitRows: Number.isFinite(splitParsed) && splitParsed > 0 ? splitParsed : null,
-          options: buildAdvancedOptions(),
+          options: schedOptions,
           schedule: {
             date: schedOnDate.trim(),
             hour: parseInt(schedOnHour, 10) || 0,
@@ -1446,7 +1432,7 @@ export default function ExportPage() {
         /* Sheets (main, 60%) beside Options (side, 40%). DOM order = visual
            order, so the layout is right even before any CSS-driven
            placement — no card-swap flash on load. */
-        .export-cols { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 1rem; align-items: start; }
+        .export-cols { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 1rem; align-items: start; }
         @media (max-width: 860px) { .export-cols { grid-template-columns: 1fr; } }
         @keyframes eg-indeterminate { 0% { transform: translateX(-120%); } 100% { transform: translateX(320%); } }
       `}</style>
@@ -1467,7 +1453,7 @@ export default function ExportPage() {
         <s-section>
           <s-stack direction="block" gap="base">
             <div style={sheetsHeader}>
-              <span style={sheetsTitle}>Sheets</span>
+              <span style={sheetsTitle}>Data</span>
               <s-text color="subdued">
                 {feedLock
                   ? "Google Shopping Feed exports Products only"
@@ -1615,8 +1601,9 @@ export default function ExportPage() {
           {/* Preset: same trigger+popover pattern as Format, with a Save
               button beside it that stores the current configuration. */}
           <span style={optionLabel}>Preset</span>
-          <div style={{ display: "flex", gap: ".5rem", alignItems: "stretch" }}>
-            <div ref={presetTriggerRef} style={{ flex: 1, minWidth: 0 }}>
+          {/* Save sits UNDER the select so the trigger gets the full width. */}
+          <div style={{ display: "flex", flexDirection: "column", gap: ".5rem", alignItems: "stretch" }}>
+            <div ref={presetTriggerRef} style={{ minWidth: 0 }}>
               <s-clickable
                 command="--toggle"
                 commandFor="preset-popover"
@@ -1636,7 +1623,12 @@ export default function ExportPage() {
                 </s-grid>
               </s-clickable>
             </div>
+            {/* inlineSize="fill" is the s-button way to go full-width
+                ("100%" is not a valid value and falls back to auto). */}
             <s-button
+              variant="secondary"
+              inlineSize="fill"
+              command="--show"
               commandFor="save-preset-modal"
               disabled={isExporting ? true : undefined}
             >
@@ -1662,7 +1654,7 @@ export default function ExportPage() {
           </s-popover>
 
           {/* Save-configuration modal */}
-          <s-modal id="save-preset-modal" heading="Save preset">
+          <s-modal id="save-preset-modal" heading="Save your changes as a preset">
             <PolarisTextField
               label="Preset name"
               value={presetName}
@@ -1748,47 +1740,47 @@ export default function ExportPage() {
             </s-text>
           </div>
 
-          {/* Which timestamp fills the placeholders (Matrixify parity). */}
-          <span style={optionLabel}>File name time source</span>
-          <PolarisSelect
-            label="File name time source"
-            labelAccessibilityVisibility="exclusive"
-            value={advFilenameSource}
-            onChange={setAdvFilenameSource}
-            options={[
-              { value: "started", label: "Started At (default)" },
-              { value: "finished", label: "Finished At" },
-            ]}
-            disabled={isExporting}
-          />
 
         </s-section>
         </div>
 
         </div>
 
-        {/* One top-level card per selected sheet, rather than a stack nested
-            inside Sheets — each export stands on its own with its filters and
-            column selection. */}
-        {enabledEntities.map((e) => (
-          <EntityConfigCard
-            key={e}
-            entity={e}
-            state={entityState[e]}
-            count={counts?.[e] ?? null}
-            dynGroups={dynGroupsFor(e)}
-            onAddFilter={() => addEntityFilterRow(e)}
-            onUpdateFilter={(id, patch) => updateEntityFilterRow(e, id, patch)}
-            onRemoveFilter={(id) => removeEntityFilterRow(e, id)}
-            onToggleField={(f) => toggleEntityField(e, f)}
-            onSetFields={(fields) => setEntityFields(e, fields)}
-            onAddSort={() => addEntitySort(e)}
-            onUpdateSort={(id, patch) => updateEntitySort(e, id, patch)}
-            onRemoveSort={(id) => removeEntitySort(e, id)}
-            onRemove={() => setEntityEnabled(e, false)}
-            disabled={isExporting}
-          />
-        ))}
+        {/* ── Sheets ──────────────────────────────────────────────────
+            The selected entities, wrapped in one card: each gets its own
+            sub-card with columns, filters and sorting. The picker table
+            above is the "Data" card. */}
+        {enabledEntities.length > 0 && (
+          <s-section>
+            <s-stack direction="block" gap="base">
+              <div style={sheetsHeader}>
+                <span style={sheetsTitle}>Sheets</span>
+                <s-text color="subdued">
+                  {enabledEntities.length} selected — each sheet has its own columns, filters and sorting
+                </s-text>
+              </div>
+              {enabledEntities.map((e) => (
+                <EntityConfigCard
+                  key={e}
+                  entity={e}
+                  state={entityState[e]}
+                  count={counts?.[e] ?? null}
+                  dynGroups={dynGroupsFor(e)}
+                  onAddFilter={() => addEntityFilterRow(e)}
+                  onUpdateFilter={(id, patch) => updateEntityFilterRow(e, id, patch)}
+                  onRemoveFilter={(id) => removeEntityFilterRow(e, id)}
+                  onToggleField={(f) => toggleEntityField(e, f)}
+                  onSetFields={(fields) => setEntityFields(e, fields)}
+                  onAddSort={() => addEntitySort(e)}
+                  onUpdateSort={(id, patch) => updateEntitySort(e, id, patch)}
+                  onRemoveSort={(id) => removeEntitySort(e, id)}
+                  onRemove={() => setEntityEnabled(e, false)}
+                  disabled={isExporting}
+                />
+              ))}
+            </s-stack>
+          </s-section>
+        )}
 
 
         {/* ── Advanced options ─────────────────────────────────────────
@@ -1946,10 +1938,22 @@ export default function ExportPage() {
 
               <hr style={sectionRule} />
 
-              {/* Export file — splitting + packaging. */}
+              {/* Export file — naming, splitting + packaging. */}
               <div style={advRow}>
                 <span style={advRowLabel}>Export file</span>
                 <div style={advRowBody}>
+                  {/* Which timestamp fills {date}/{time} in the file name
+                      (Matrixify parity). */}
+                  <PolarisSelect
+                    label="File name time source"
+                    value={advFilenameSource}
+                    onChange={setAdvFilenameSource}
+                    options={[
+                      { value: "started", label: "Started At (default)" },
+                      { value: "finished", label: "Finished At" },
+                    ]}
+                    disabled={isExporting}
+                  />
                   {/* A big export becomes a zip of numbered parts; multi-row
                       records (products/orders) never straddle a part. */}
                   <div style={fieldHelpWrap}>
@@ -2155,6 +2159,120 @@ export default function ExportPage() {
                 </div>
               </div>
 
+              <hr style={sectionRule} />
+
+              {/* Delivery — the run page's "Deliver to" picker, chosen
+                  up-front: the finished file is pushed automatically. */}
+              <div style={advRow}>
+                <span style={advRowLabel}>Deliver to</span>
+                <div style={{ ...advRowBody, maxWidth: 720 }}>
+                  <div style={fieldHelpWrap}>
+                    <s-grid gridTemplateColumns="auto 1fr" gap="small-200" alignItems="center">
+                      <div ref={deliverTriggerRef} style={{ minWidth: 180 }}>
+                        <s-clickable
+                          command="--toggle"
+                          commandFor="adv-deliver-popover"
+                          disabled={isExporting ? true : undefined}
+                          inlineSize="100%"
+                          borderWidth="base"
+                          borderStyle="solid"
+                          borderColor="strong"
+                          borderRadius="base"
+                          paddingInline="small-100"
+                          blockSize="32px"
+                          background="base"
+                        >
+                          {(() => {
+                            const sel = savedServers.find((s) => s.id === advDeliverTarget);
+                            return (
+                              <s-grid gridTemplateColumns="1fr auto" gap="small" alignItems="center">
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: ".4rem" }}>
+                                  {!sel && <s-icon type="link" />}
+                                  {sel ? `${sel.label} (${String(sel.protocol).toUpperCase()})` : "URL"}
+                                </span>
+                                <s-icon type="select" />
+                              </s-grid>
+                            );
+                          })()}
+                        </s-clickable>
+                      </div>
+                      <s-popover id="adv-deliver-popover" {...widthProps(Math.max(deliverTriggerWidth, 240))}>
+                        <s-box padding="small-200">
+                          <s-stack direction="block" gap="small-300">
+                            {/* URL = ad-hoc destination typed in the field
+                                beside; credentials ride in the URL and are
+                                never saved with presets or schedules. */}
+                            <PickerRow
+                              icon={<s-icon type="link" />}
+                              label="URL"
+                              selected={!advDeliverTarget}
+                              onSelect={() => {
+                                setAdvDeliverTarget("");
+                                setAdvDeliverUrl(typedDeliverUrl.current);
+                              }}
+                              popoverId="adv-deliver-popover"
+                            />
+                            {/* Navigates — adding a server lives on its own page. */}
+                            <s-clickable
+                              onClick={() => { setAddingServer(true); navigate("/app/servers"); }}
+                              padding="small-200"
+                              borderRadius="base"
+                            >
+                              <s-grid gridTemplateColumns="auto 1fr" gap="small-200" alignItems="center">
+                                <span style={checkSlot}>
+                                  {addingServer
+                                    ? <s-spinner size="small" accessibilityLabel="Opening Servers" />
+                                    : <s-icon type="plus" />}
+                                </span>
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: ".35rem" }}>
+                                  Add a new server
+                                  <s-icon type="external" />
+                                </span>
+                              </s-grid>
+                            </s-clickable>
+                            <s-text color="subdued">Saved servers</s-text>
+                            {savedServers.filter((s) => s.protocol !== "https").length === 0 && (
+                              <s-text color="subdued">No saved servers yet.</s-text>
+                            )}
+                            {savedServers.filter((s) => s.protocol !== "https").map((s) => (
+                              <PickerRow
+                                key={s.id}
+                                label={`${s.label} (${String(s.protocol).toUpperCase()})`}
+                                selected={advDeliverTarget === s.id}
+                                // Fill the field with the server's URL (username
+                                // included; the stored password is injected
+                                // server-side at send — it never reaches the
+                                // browser). Append a folder to taste.
+                                onSelect={() => {
+                                  // Leaving URL mode: keep what was typed so
+                                  // switching back restores it.
+                                  if (!advDeliverTarget) typedDeliverUrl.current = advDeliverUrl;
+                                  setAdvDeliverTarget(s.id);
+                                  setAdvDeliverUrl(buildRemoteUrl(s, ""));
+                                }}
+                                popoverId="adv-deliver-popover"
+                              />
+                            ))}
+                          </s-stack>
+                        </s-box>
+                      </s-popover>
+                      <SharedTextField
+                        label="Destination URL"
+                        labelAccessibilityVisibility="exclusive"
+                        placeholder="ftp://user:pass@host/folder — also ftps://, sftp://"
+                        value={advDeliverUrl}
+                        onChange={setAdvDeliverUrl}
+                        disabled={isExporting}
+                      />
+                    </s-grid>
+                    <s-text color="subdued">
+                      Push the finished file to a saved FTP/SFTP/S3 server —
+                      sent automatically right after the export completes.
+                    </s-text>
+                  </div>
+                </div>
+              </div>
+
             </s-stack>
             </div>
           )}
@@ -2194,33 +2312,6 @@ export default function ExportPage() {
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
-function capitalize(s) {
-  // Title-case each underscore-separated word: "smart_collections" → "Smart Collections".
-  return s.split("_").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
-}
-
-// Display names that don't follow the default title-casing of the entity key.
-const ENTITY_LABEL_OVERRIDES = {
-  definitions: "Metafield definitions",
-  inventory_transfers: "Inventory transfers",
-  smart_collections: "Smart collections",
-  custom_collections: "Manual collections", // Shopify admin's name for custom collections
-  articles: "Blog posts",
-  gift_cards: "Gift cards",
-  selling_plans: "Selling plans",
-  delivery_profiles: "Shipping profiles",
-  store_credit: "Store credit",
-  product_media: "Product media",
-  segments: "Customer segments",
-  // Exports the full translatable-content template (every translatable field,
-  // translated or not), so "Translatables" is more accurate than "Translations".
-  translations: "Translatables",
-};
-
-/** Human label for an entity key — override first, else title-cased key. */
-function entityDisplayName(e) {
-  return ENTITY_LABEL_OVERRIDES[e] ?? capitalize(e);
-}
 
 
 /**
@@ -3091,7 +3182,7 @@ const colOrderHintRow = {
 // Capped so a 45-column entity doesn't turn the card into a mile of rows.
 const colOrderList = {
   display: "flex", flexDirection: "column", gap: ".25rem",
-  maxHeight: 260, overflowY: "auto", paddingRight: ".25rem",
+  maxHeight: 440, overflowY: "auto", paddingRight: ".25rem",
 };
 const colOrderIndex = {
   minWidth: 22, fontSize: ".6875rem", color: "#8a9199", textAlign: "right",

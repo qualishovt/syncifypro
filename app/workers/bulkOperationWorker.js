@@ -61,7 +61,7 @@ const MIME_TYPES = {
  */
 export async function processBulkOperation({ jobId, jsonlUrl, entity, format, shop, fields, admin }) {
   const mimeType  = MIME_TYPES[format] ?? "application/octet-stream";
-  const timestamp = new Date().toISOString().slice(0, 19).replace("T", "-").replace(/:/g, "-");
+  const timestamp = new Date().toISOString().slice(0, 19).replace("T", "-").replace(/:/g, "");
   // Capital first letter, matching the tracked-path file names.
   const entityName = entity.charAt(0).toUpperCase() + entity.slice(1);
   const filename  = `${entityName}-${timestamp}.${format}`;
