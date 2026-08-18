@@ -82,6 +82,49 @@ async function fetchAll(creds, path, onPage) {
   return out;
 }
 
+/**
+ * Turn the migration filters (see platforms.js MIGRATION_FILTERS) into the
+ * WooCommerce REST query string for one entity — server-side, so WooCommerce
+ * only sends back matching records. `filters` is { key: value } where list
+ * filters hold an array and date filters an ISO date (YYYY-MM-DD).
+ *
+ *   product_status         → products?status=publish,draft   (default: any)
+ *   *_created_after/before → after= / before=   (ISO 8601 datetime)
+ *   *_updated_after/before → modified_after= / modified_before=
+ *   customer_role          → customers?role=…   (WC accepts ONE role; the
+ *                            first is sent, the rest filtered client-side)
+ */
+export function wooQuery(entity, filters = {}) {
+  const p = new URLSearchParams();
+  const pref = { products: "product", orders: "order", customers: "customer" }[entity];
+  if (!pref) return "";
+  const list = (k) => Array.isArray(filters[k]) ? filters[k].filter(Boolean) : [];
+  const date = (k, endOfDay) => {
+    const v = String(filters[k] ?? "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return null;
+    return endOfDay ? `${v}T23:59:59` : `${v}T00:00:00`;
+  };
+  if (entity === "products") {
+    const st = list("product_status");
+    p.set("status", st.length ? st.join(",") : "any");
+  }
+  if (entity === "orders") {
+    const st = list("order_status");
+    p.set("status", st.length ? st.join(",") : "any");
+  }
+  if (entity === "customers") {
+    const roles = list("customer_role");
+    p.set("role", roles[0] || "customer");
+  }
+  const a = date(`${pref}_created_after`), b = date(`${pref}_created_before`, false);
+  const ma = date(`${pref}_updated_after`), mb = date(`${pref}_updated_before`, false);
+  if (a) p.set("after", a);
+  if (b) p.set("before", b);
+  if (ma) p.set("modified_after", ma);
+  if (mb) p.set("modified_before", mb);
+  return p.toString();
+}
+
 const STATUS_MAP = { publish: "ACTIVE", draft: "DRAFT", pending: "DRAFT", private: "DRAFT" };
 
 // Shopify wants price = selling price, compare-at = the higher original. Woo puts
@@ -113,8 +156,8 @@ function variantFields(v, attrNames) {
 }
 
 /** Pull products (+ variations) → app product rows (Matrixify top-row layout). */
-export async function fetchWooProducts(creds, onProgress) {
-  const products = await fetchAll(creds, "products?status=any", onProgress);
+export async function fetchWooProducts(creds, onProgress, filters = {}) {
+  const products = await fetchAll(creds, `products?${wooQuery("products", filters)}`, onProgress);
   const rows = [];
   let rn = 1;
 
@@ -167,9 +210,32 @@ export async function fetchWooProducts(creds, onProgress) {
   return rows;
 }
 
-/** Pull customers → app customer rows (one row each, with the billing address). */
-export async function fetchWooCustomers(creds, onProgress) {
-  const customers = await fetchAll(creds, "customers?role=all", onProgress);
+/**
+ * Pull customers → app customer rows (one row each, with the billing address).
+ * Only WooCommerce's `customer` role: `role=all` also returns the store's
+ * admins/editors as "customers" (verified against a live store), which no
+ * merchant wants imported into Shopify.
+ */
+export async function fetchWooCustomers(creds, onProgress, filters = {}) {
+  const roles = Array.isArray(filters.customer_role) ? filters.customer_role.filter(Boolean) : [];
+  let customers = await fetchAll(creds, `customers?${wooQuery("customers", filters)}`, onProgress);
+  // WooCommerce accepts one role per request; when several are picked, pull
+  // the rest too and merge (a user has one role, so no duplicates).
+  for (const extra of roles.slice(1)) {
+    customers = customers.concat(await fetchAll(creds, `customers?${wooQuery("customers", { ...filters, customer_role: [extra] })}`, onProgress));
+  }
+  // The customers endpoint ignores after/before/modified_* (only products and
+  // orders honour them), so apply the customer date filters here.
+  const day = (k) => (/^\d{4}-\d{2}-\d{2}$/.test(String(filters[k] ?? "").trim()) ? new Date(`${String(filters[k]).trim()}T00:00:00Z`).getTime() : null);
+  const cA = day("customer_created_after"), cB = day("customer_created_before");
+  const uA = day("customer_updated_after"), uB = day("customer_updated_before");
+  const within = (iso, a, b) => {
+    if (a == null && b == null) return true;
+    const t = iso ? new Date(`${iso}Z`).getTime() : NaN;   // Woo dates are site-local without a zone
+    if (Number.isNaN(t)) return false;
+    return (a == null || t >= a) && (b == null || t < b);
+  };
+  customers = customers.filter((c) => within(c.date_created_gmt || c.date_created, cA, cB) && within(c.date_modified_gmt || c.date_modified, uA, uB));
   let rn = 1;
   return customers
     .map((c) => {
@@ -226,8 +292,8 @@ function addressFields(prefix, a = {}) {
  * first line-item row, then a row per additional line item). Line items carry
  * title + sku + price + qty so orders import even without matched Shopify IDs.
  */
-export async function fetchWooOrders(creds, onProgress) {
-  const orders = await fetchAll(creds, "orders?status=any", onProgress);
+export async function fetchWooOrders(creds, onProgress, filters = {}) {
+  const orders = await fetchAll(creds, `orders?${wooQuery("orders", filters)}`, onProgress);
   const rows = [];
   let rn = 1;
 
@@ -290,6 +356,69 @@ export async function fetchWooCategories(creds, onProgress) {
     rules: JSON.stringify([{ column: "TAG", relation: "EQUALS", condition: c.name || "" }]),
     image_url: c.image?.src || "",
   })).filter((r) => r.title);
+}
+
+/**
+ * Generate URL redirects → redirect rows. WooCommerce has no redirects of its
+ * own (no REST endpoint — verified against a live store); like Altera, this
+ * GENERATES them: every product's and category's old WooCommerce URL path
+ * redirects to where the same handle will live in Shopify, so old links and
+ * search rankings survive the move. Uses each item's real permalink (WooCommerce
+ * permalink bases are configurable — /product/, /shop/, /product-category/…),
+ * reduced to its path, so the redirect matches what customers actually had.
+ */
+export async function fetchWooRedirects(creds, onProgress, filters = {}) {
+  const [products, cats, catLinks] = await Promise.all([
+    fetchAll(creds, `products?${wooQuery("products", filters)}`, onProgress),
+    fetchAll(creds, "products/categories"),
+    fetchCategoryLinks(creds),
+  ]);
+  const rows = [];
+  const seen = new Set();
+  const add = (fromUrl, toPath) => {
+    const from = permalinkPath(fromUrl);
+    if (!from || !toPath || from === toPath || seen.has(from)) return;
+    seen.add(from);
+    rows.push({ command: "MERGE", path: from, target: toPath });
+  };
+  for (const p of products) if (p.slug) add(p.permalink, `/products/${p.slug}`);
+  for (const c of cats) {
+    if (!c.slug || c.slug === "uncategorized") continue;
+    // WC's category endpoint carries no URL; WordPress core's product_cat
+    // does (and honours the store's permalink base). Fall back to the
+    // WooCommerce default base when core isn't reachable.
+    const link = catLinks.get(c.id) ?? `${apiBase(creds.siteUrl).replace(/\/wp-json\/wc\/v3$/, "")}/product-category/${c.slug}/`;
+    add(link, `/collections/${c.slug}`);
+  }
+  return rows;
+}
+
+/** Category id → public URL, from WordPress core's product_cat taxonomy (no auth needed). */
+async function fetchCategoryLinks(creds) {
+  const links = new Map();
+  try {
+    const root = apiBase(creds.siteUrl).replace(/\/wp-json\/wc\/v3$/, "");
+    for (let page = 1; page <= 50; page++) {
+      const res = await fetch(`${root}/wp-json/wp/v2/product_cat?per_page=100&page=${page}&_fields=id,link`);
+      if (!res.ok) break;
+      const batch = await res.json();
+      if (!Array.isArray(batch) || batch.length === 0) break;
+      for (const c of batch) if (c.id && c.link) links.set(c.id, c.link);
+      if (batch.length < 100) break;
+    }
+  } catch { /* best-effort — the caller falls back to the default base */ }
+  return links;
+}
+
+/** "https://shop.com/product/vintage-tee/" → "/product/vintage-tee" (no host, no trailing slash). */
+function permalinkPath(url) {
+  if (!url) return "";
+  try {
+    const u = new URL(url);
+    return u.pathname.replace(/\/+$/, "") || "";
+  } catch {
+    return "";
+  }
 }
 
 const COUPON_TYPE = { percent: "percentage", fixed_cart: "fixed_amount", fixed_product: "fixed_amount" };

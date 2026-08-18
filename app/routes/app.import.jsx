@@ -33,18 +33,30 @@ import { buildRemoteUrl } from "../import/urlSource.js";
 export async function loader({ request }) {
   const { session } = await authenticate.admin(request);
   const url = new URL(request.url);
-  const jobId = url.searchParams.get("jobId");
 
-  // Job-status polling (during/after an import).
+  // A run's own URL (/app/import?jobId=…): the after-import state, distinct
+  // from the preview's ?job=&src=&name=. `&poll=1` is the lightweight status
+  // poll (job only); without it the loader also rebuilds the preview from the
+  // job's stored file + plan, so the locked cards show what ran.
+  const empty = { src: null, name: null, preview: null, presets: [], defaultImportMode: "normal", timezone: "UTC", servers: [], readyJob: null };
+  const jobId = url.searchParams.get("jobId");
+  let runJob = null;
   if (jobId) {
     const { getImportJob } = await import("../db/bulkImportJob.server.js");
     const found = await getImportJob(jobId);
-    return { job: found && found.shop === session.shop ? serializeJob(found) : null, src: null, name: null, preview: null, presets: [], defaultImportMode: "normal", timezone: "UTC", servers: [], readyJob: null };
+    if (!found || found.shop !== session.shop) return { job: null, ...empty };
+    if (url.searchParams.get("poll")) return { job: serializeJob(found), ...empty };
+    // A "ready" row is a preview, not a run — hand over to the preview URL.
+    if (found.status === "ready" && found.sourceR2Key) {
+      return redirect(`/app/import?src=${encodeURIComponent(found.sourceR2Key)}&name=${encodeURIComponent(found.filename || "import")}&job=${encodeURIComponent(found.id)}`);
+    }
+    if (!found.sourceR2Key) return { job: serializeJob(found), ...empty };
+    runJob = found;
   }
 
   // A staged upload → download + analyze so we can show the options.
-  const src = url.searchParams.get("src");
-  const name = url.searchParams.get("name");
+  const src = runJob ? runJob.sourceR2Key : url.searchParams.get("src");
+  const name = runJob ? (runJob.filename || "import") : url.searchParams.get("name");
   if (!src) return redirect("/app");
   const format = formatFromName(name || src) ?? "csv";
 
@@ -54,20 +66,22 @@ export async function loader({ request }) {
   // a fresh ready row and reloads with it, so it's numbered too. Resolved
   // BEFORE the download + analysis so a redirect costs nothing.
   let readyJob = null;
-  const readyId = url.searchParams.get("job");
-  const { getImportJob, createReadyImportJob } = await import("../db/bulkImportJob.server.js");
-  if (readyId) {
-    const row = await getImportJob(readyId);
-    if (row && row.shop === session.shop && row.status === "ready") {
-      readyJob = { id: row.id, number: row.number ?? null };
+  if (!runJob) {
+    const readyId = url.searchParams.get("job");
+    const { getImportJob, createReadyImportJob } = await import("../db/bulkImportJob.server.js");
+    if (readyId) {
+      const row = await getImportJob(readyId);
+      if (row && row.shop === session.shop && row.status === "ready") {
+        readyJob = { id: row.id, number: row.number ?? null };
+      }
     }
-  }
-  if (!readyJob) {
-    try {
-      const fresh = await createReadyImportJob({ shop: session.shop, format, filename: name || "import", sourceR2Key: src });
-      url.searchParams.set("job", fresh.id);
-      return redirect(`${url.pathname}?${url.searchParams.toString()}`);
-    } catch { /* fall through — the preview works without a number */ }
+    if (!readyJob) {
+      try {
+        const fresh = await createReadyImportJob({ shop: session.shop, format, filename: name || "import", sourceR2Key: src });
+        url.searchParams.set("job", fresh.id);
+        return redirect(`${url.pathname}?${url.searchParams.toString()}`);
+      } catch { /* fall through — the preview works without a number */ }
+    }
   }
 
   const { downloadFromR2, signDownloadUrl } = await import("../export/delivery/r2.js");
@@ -75,7 +89,10 @@ export async function loader({ request }) {
   const { getAppSettings } = await import("../db/appSettings.server.js");
   const fileBuffer = await downloadFromR2(src);
   const { defaultImportMode, blockedEntities, timezone } = await getAppSettings(session.shop);
-  const { sheets, totals } = analyzeWorkbook({ fileBuffer, format, filename: name, blockedEntities });
+  // A finished run re-analyzes with the plan it actually ran, so the locked
+  // cards show the sheets/columns/filters as they were.
+  const runPlan = runJob ? parseJsonOr(runJob.plan, null) : null;
+  const { sheets, totals } = analyzeWorkbook({ fileBuffer, format, plan: runPlan ?? undefined, filename: name, blockedEntities });
   // Signed URL + size let the header show the staged file as a download link.
   let fileUrl = null;
   try { fileUrl = (await signDownloadUrl(src, name || "import")).signedUrl; } catch { /* link is optional */ }
@@ -85,7 +102,13 @@ export async function loader({ request }) {
   // shape (no password/secret), same as the run page.
   const { listImportServers, serializeImportServer } = await import("../db/importServer.server.js");
   const servers = (await listImportServers(session.shop)).map(serializeImportServer);
-  return { job: null, src, name: name || "import", preview, presets, defaultImportMode, timezone: timezone || "UTC", servers, readyJob };
+  return {
+    job: runJob ? serializeJob(runJob) : null,
+    // The run's stored plan/options rehydrate the locked cards.
+    runPlan,
+    runOptions: runJob ? parseJsonOr(runJob.options, null) : null,
+    src, name: name || "import", preview, presets, defaultImportMode, timezone: timezone || "UTC", servers, readyJob,
+  };
 }
 
 function serializePreset(p) {
@@ -135,6 +158,78 @@ export async function action({ request }) {
     const { requestImportCancel } = await import("../db/bulkImportJob.server.js");
     const ok = await requestImportCancel(session.shop, String(formData.get("jobId")));
     return { cancelRequested: ok };
+  }
+
+  // On-demand delivery of the results workbook to a saved server or an ad-hoc
+  // FTP/SFTP URL — the export result page's "Deliver to", for imports.
+  if (intent === "deliver") {
+    try {
+      const { getImportJob } = await import("../db/bulkImportJob.server.js");
+      const job = await getImportJob(String(formData.get("jobId")));
+      if (!job || job.shop !== session.shop || job.status !== "complete" || !job.resultR2Key) {
+        return data({ deliverError: "That import's results file is no longer available." }, { status: 400 });
+      }
+      const { downloadFromR2 } = await import("../export/delivery/r2.js");
+      const body = await downloadFromR2(job.resultR2Key);
+      const base = (job.filename || "import").replace(/\.[^.]+$/, "");
+      const filename = `${base}-results.xlsx`;
+      const target = String(formData.get("target") || "");
+
+      // Ad-hoc destination typed as a URL — credentials ride in the URL
+      // itself (ftp://user:pass@host/folder), nothing is saved.
+      if (target === "url") {
+        const raw = String(formData.get("url") || "").trim();
+        let u;
+        try { u = new URL(raw); } catch {
+          return data({ deliverError: "That doesn't look like a valid URL." }, { status: 400 });
+        }
+        const protocol = u.protocol.replace(/:$/, "").toLowerCase();
+        if (!["ftp", "ftps", "sftp"].includes(protocol)) {
+          return data({ deliverError: "Use an ftp://, ftps:// or sftp:// URL — e.g. ftp://user:pass@host/folder." }, { status: 400 });
+        }
+        const { uploadToFtp } = await import("../schedules/delivery.server.js");
+        const where = await uploadToFtp({
+          protocol,
+          host: u.hostname,
+          port: u.port ? Number(u.port) : undefined,
+          user: decodeURIComponent(u.username || ""),
+          password: decodeURIComponent(u.password || ""),
+          path: decodeURIComponent(u.pathname || ""),
+        }, { filename, body });
+        return { delivered: where };
+      }
+
+      const { getImportServer } = await import("../db/importServer.server.js");
+      const server = await getImportServer(session.shop, target);
+      if (!server) return data({ deliverError: "Pick a saved server or type a URL." }, { status: 400 });
+      const path = String(formData.get("path") || "").trim();
+      if (server.protocol === "s3") {
+        const { uploadToS3 } = await import("../schedules/delivery.server.js");
+        const where = await uploadToS3({
+          bucket: server.host,
+          region: server.region || "us-east-1",
+          accessKeyId: server.username,
+          secretAccessKey: server.password,
+          prefix: path,
+        }, { filename, body, contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+        return { delivered: where };
+      }
+      if (server.protocol === "https") {
+        return data({ deliverError: "HTTP(S) servers are download sources — pick an FTP/SFTP/S3 server or type a URL." }, { status: 400 });
+      }
+      const { uploadToFtp } = await import("../schedules/delivery.server.js");
+      const where = await uploadToFtp({
+        protocol: server.protocol,
+        host: server.host,
+        port: server.port,
+        user: server.username,
+        password: server.password,
+        path,
+      }, { filename, body });
+      return { delivered: where };
+    } catch (err) {
+      return data({ deliverError: err.message }, { status: 500 });
+    }
   }
 
   // "Failed rows only": rebuild a file containing just the rows that errored,
@@ -458,19 +553,40 @@ const RESULTS_TIME_SOURCES = new Set(["started", "scheduled", "saved"]);
 const STATUS_TONE = { complete: "success", failed: "critical", running: "info", pending: "info", cancelled: "warning" };
 const STATUS_LABEL = { complete: "Complete", failed: "Failed", running: "Running", pending: "Queued", cancelled: "Cancelled" };
 
-export default function ImportPage() {
-  const { src, name, preview: initialPreview, job: initialJob, presets: initialPresets, defaultImportMode, timezone, servers, readyJob } = useLoaderData();
+/**
+ * Route entry. The page keeps a lot of run state in React state, so going
+ * from a finished run's URL (?jobId=…) back to a preview URL ("Import again")
+ * must start from a clean mount — otherwise the mounted component keeps
+ * showing the old run. The key bumps ONLY on that run → preview transition;
+ * the preview → run hop during an import (navigate to ?jobId=) keeps the
+ * same instance so live progress isn't interrupted.
+ */
+export default function ImportRoute() {
+  const { job } = useLoaderData();
+  const isRun = Boolean(job);
+  const gen = useRef(0);
+  const wasRun = useRef(isRun);
+  if (wasRun.current && !isRun) gen.current += 1;
+  wasRun.current = isRun;
+  return <ImportPage key={gen.current} />;
+}
+
+function ImportPage() {
+  const { src, name, preview: initialPreview, job: initialJob, presets: initialPresets, defaultImportMode, timezone, servers, readyJob, runPlan, runOptions } = useLoaderData();
   const fetcher = useFetcher();        // re-analyze / apply
   const pollFetcher = useFetcher();    // job status polling
   const presetFetcher = useFetcher();  // save / delete import presets
   const cancelFetcher = useFetcher();  // asks a running import to stop
   const failedFetcher = useFetcher();  // builds the failed-rows-only file
   const schedFetcher = useFetcher();   // deferred "Run on" schedule creation
+  const deliverFetcher = useFetcher(); // on-demand delivery of the results workbook
   const navigate = useNavigate();
 
-  const [plan, setPlan] = useState(null);       // per-sheet {entity, include}, by index
-  const [importMode, setImportMode] = useState(defaultImportMode ?? "normal");
-  const [importOpts, setImportOpts] = useState(DEFAULT_IMPORT_OPTS);
+  // A run opened at its own URL rehydrates the plan/mode/options it ran with,
+  // so the locked cards show the configuration as it was.
+  const [plan, setPlan] = useState(Array.isArray(runPlan) ? runPlan : null);
+  const [importMode, setImportMode] = useState(runOptions?.mode ?? defaultImportMode ?? "normal");
+  const [importOpts, setImportOpts] = useState(runOptions ? { ...DEFAULT_IMPORT_OPTS, ...runOptions } : DEFAULT_IMPORT_OPTS);
   const setOpt = (k, v) => setImportOpts((o) => ({ ...o, [k]: v }));
   // Options as the job/schedule/preset stores them. The ad-hoc delivery URL
   // (which can carry credentials) only rides on a one-off run; anything that
@@ -522,6 +638,13 @@ export default function ImportPage() {
   // the field with the server's URL, so switching back restores this.
   const typedDeliverUrl = useRef("");
   const [addingServer, setAddingServer] = useState(false);
+  // Result banner's on-demand "Deliver to" (the export result page's):
+  // "" = ad-hoc URL mode, else a saved server id.
+  const [resDeliverTarget, setResDeliverTarget] = useState("");
+  const [resDeliverUrl, setResDeliverUrl] = useState("");
+  const typedResDeliverUrl = useRef("");
+  const [resDeliverTriggerRef, resDeliverTriggerWidth] = useElementWidth();
+  const delivering = deliverFetcher.state !== "idle";
 
   const presets = initialPresets ?? [];
   const busy = fetcher.state !== "idle";
@@ -559,9 +682,18 @@ export default function ImportPage() {
     }
   }, [preview, plan]);
 
-  // When apply returns a jobId, start polling.
+  // When apply returns a jobId, start polling — and give the run its own
+  // URL (/app/import?jobId=…), distinct from the preview's, so a refresh
+  // shows the run's state, not the before-import preview.
   useEffect(() => {
-    if (d?.mode === "apply" && d.jobId) setPollingJobId(d.jobId);
+    if (d?.mode === "apply" && d.jobId) {
+      setPollingJobId(d.jobId);
+      // Through the router (not raw history.replaceState): App Bridge mirrors
+      // router navigations to the admin's address bar, so the copied URL is
+      // the run's. `replace` keeps Back from returning to the preview.
+      navigate(`/app/import?jobId=${encodeURIComponent(d.jobId)}`, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [d]);
 
   // Opened from a Recent-activity "#" link (/app/import?jobId=…) — show that job.
@@ -571,7 +703,7 @@ export default function ImportPage() {
   }, []);
 
   useEffect(() => {
-    if (pollingJobId) pollFetcher.load(`/app/import?jobId=${pollingJobId}`);
+    if (pollingJobId) pollFetcher.load(`/app/import?jobId=${pollingJobId}&poll=1`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pollingJobId]);
 
@@ -579,7 +711,7 @@ export default function ImportPage() {
     if (!pollingJobId) return;
     if (job?.status === "complete" || job?.status === "failed" || job?.status === "cancelled") return;
     const interval = setInterval(() => {
-      pollFetcher.load(`/app/import?jobId=${pollingJobId}`);
+      pollFetcher.load(`/app/import?jobId=${pollingJobId}&poll=1`);
     }, 2000);
     return () => clearInterval(interval);
   }, [pollingJobId, job?.status, pollFetcher]);
@@ -750,7 +882,14 @@ export default function ImportPage() {
           slot="secondary-actions"
           variant="secondary"
           icon="upload"
-          href={`/app/import?src=${encodeURIComponent(src)}&name=${encodeURIComponent(name ?? "")}`}
+          // Client-side navigation to the preview URL; ImportRoute remounts
+          // the page on this run → preview transition so it starts clean
+          // (and the loader stages a fresh, numbered ready job). A raw
+          // iframe reload would drop the embedded-session params and land
+          // on the app's login page.
+          onClick={() => {
+            navigate(`/app/import?src=${encodeURIComponent(src)}&name=${encodeURIComponent(name ?? "")}`);
+          }}
         >
           Import again
         </s-button>
@@ -794,7 +933,136 @@ export default function ImportPage() {
           {/* Results workbook is always .xlsx — download in place (also the
               title bar's primary action, like the export's Download). */}
           {job.resultUrl && (
-            <s-button slot="secondary-actions" href={job.resultUrl}>Download results</s-button>
+            <div style={{ marginTop: ".4rem" }}>
+              <s-button variant="secondary" icon="download" href={job.resultUrl}>Download results</s-button>
+            </div>
+          )}
+
+          {/* On-demand delivery of the results workbook — the export result
+              page's "Deliver to", right under the Download button. */}
+          {job.resultUrl && (
+            <div style={{ marginTop: "1.25rem" }}>
+              <span style={{ display: "block", fontSize: ".8125rem", fontWeight: 600, marginBottom: ".25rem" }}>Deliver to</span>
+              <div style={fieldHelpWrap}>
+                <s-grid gridTemplateColumns="auto 1fr auto" gap="small-200" alignItems="center">
+                  <div ref={resDeliverTriggerRef} style={{ minWidth: 180 }}>
+                    <s-clickable
+                      command="--toggle"
+                      commandFor="res-deliver-popover"
+                      inlineSize="100%"
+                      borderWidth="base"
+                      borderStyle="solid"
+                      borderColor="strong"
+                      borderRadius="base"
+                      paddingInline="small-100"
+                      blockSize="32px"
+                      background="base"
+                    >
+                      {(() => {
+                        const sel = (servers ?? []).find((s) => s.id === resDeliverTarget);
+                        return (
+                          <s-grid gridTemplateColumns="1fr auto" gap="small" alignItems="center">
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: ".4rem" }}>
+                              {!sel && <s-icon type="link" />}
+                              {sel ? `${sel.label} (${String(sel.protocol).toUpperCase()})` : "URL"}
+                            </span>
+                            <s-icon type="select" />
+                          </s-grid>
+                        );
+                      })()}
+                    </s-clickable>
+                  </div>
+                  <s-popover id="res-deliver-popover" {...widthProps(Math.max(resDeliverTriggerWidth, 240))}>
+                    <s-box padding="small-200">
+                      <s-stack direction="block" gap="small-300">
+                        {/* URL = ad-hoc destination typed in the field beside;
+                            credentials ride in the URL, nothing is saved. */}
+                        <PickerRow
+                          icon={<s-icon type="link" />}
+                          label="URL"
+                          selected={!resDeliverTarget}
+                          onSelect={() => {
+                            setResDeliverTarget("");
+                            setResDeliverUrl(typedResDeliverUrl.current);
+                          }}
+                          popoverId="res-deliver-popover"
+                        />
+                        {/* Navigates — adding a server lives on its own page. */}
+                        <s-clickable
+                          onClick={() => { setAddingServer(true); navigate("/app/servers"); }}
+                          padding="small-200"
+                          borderRadius="base"
+                        >
+                          <s-grid gridTemplateColumns="auto 1fr" gap="small-200" alignItems="center">
+                            <span style={checkSlot}>
+                              {addingServer
+                                ? <s-spinner size="small" accessibilityLabel="Opening Servers" />
+                                : <s-icon type="plus" />}
+                            </span>
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: ".35rem" }}>
+                              Add a new server
+                              <s-icon type="external" />
+                            </span>
+                          </s-grid>
+                        </s-clickable>
+                        <s-text color="subdued">Saved servers</s-text>
+                        {(servers ?? []).filter((s) => s.protocol !== "https").length === 0 && (
+                          <s-text color="subdued">No saved servers yet.</s-text>
+                        )}
+                        {(servers ?? []).filter((s) => s.protocol !== "https").map((s) => (
+                          <PickerRow
+                            key={s.id}
+                            label={`${s.label} (${String(s.protocol).toUpperCase()})`}
+                            selected={resDeliverTarget === s.id}
+                            // Fill the field with the server's URL (username
+                            // included; the stored password is injected
+                            // server-side at send — it never reaches the
+                            // browser). Append a folder to taste.
+                            onSelect={() => {
+                              if (!resDeliverTarget) typedResDeliverUrl.current = resDeliverUrl;
+                              setResDeliverTarget(s.id);
+                              setResDeliverUrl(buildRemoteUrl(s, ""));
+                            }}
+                            popoverId="res-deliver-popover"
+                          />
+                        ))}
+                      </s-stack>
+                    </s-box>
+                  </s-popover>
+                  <PolarisTextField
+                    label="Destination URL"
+                    labelAccessibilityVisibility="exclusive"
+                    placeholder="ftp://user:pass@host/folder — also ftps://, sftp://"
+                    value={resDeliverUrl}
+                    onChange={setResDeliverUrl}
+                  />
+                  <s-button
+                    disabled={
+                      delivering
+                      || (!resDeliverTarget && !/^(ftp|ftps|sftp):\/\/[^\s/]+/i.test(resDeliverUrl.trim()))
+                        ? true : undefined
+                    }
+                    loading={delivering ? true : undefined}
+                    onClick={() =>
+                      deliverFetcher.submit({
+                        intent: "deliver",
+                        jobId: job.id,
+                        target: resDeliverTarget || "url",
+                        url: resDeliverUrl.trim(),
+                        // Saved-server sends keep their stored credentials;
+                        // only the folder is taken from the typed URL.
+                        path: (() => { try { return new URL(resDeliverUrl).pathname; } catch { return ""; } })(),
+                      }, { method: "post" })
+                    }
+                  >
+                    Send
+                  </s-button>
+                </s-grid>
+                <s-text color="subdued">
+                  Push the results file to a saved FTP/SFTP/S3 server.
+                </s-text>
+              </div>
+            </div>
           )}
           {job.failed > 0 && (
             <s-button
@@ -807,6 +1075,12 @@ export default function ImportPage() {
             </s-button>
           )}
         </s-banner>
+      )}
+      {finished && job.status === "complete" && deliverFetcher.data?.delivered && (
+        <s-banner tone="success" dismissible>{deliverFetcher.data.delivered}</s-banner>
+      )}
+      {finished && job.status === "complete" && deliverFetcher.data?.deliverError && (
+        <s-banner tone="critical" dismissible>{deliverFetcher.data.deliverError}</s-banner>
       )}
       {finished && job.status === "complete" && failedFetcher.data?.failedRowsUrl && (
         <s-banner tone="info" dismissible>
@@ -847,35 +1121,12 @@ export default function ImportPage() {
             <s-section>
               <s-stack direction="block" gap="base">
 
-                {/* Status head */}
-                <s-grid gridTemplateColumns="1fr auto" gap="base" alignItems="center">
-                  <s-stack direction="inline" gap="small-200" alignItems="center">
-                    {preRun ? (
-                      <s-badge tone={ready ? "success" : "warning"}>
-                        {ready ? "Ready to import" : "Nothing to import"}
-                      </s-badge>
-                    ) : (
-                      <s-badge tone={STATUS_TONE[status] ?? "info"}>
-                        {status === "complete" && (
-                          <span style={{ fontSize: ".85em", display: "inline-block", transform: "translateY(-1px)", marginRight: 3 }}>●</span>
-                        )}
-                        {STATUS_LABEL[status] ?? status}
-                      </s-badge>
-                    )}
-                    <s-badge>
-                      <span className="fmt-badge" style={formatLabelWrap}>
-                        <ImportIcon />
-                        Import
-                      </span>
-                    </s-badge>
-                    <s-badge>
-                      <span className="fmt-badge" style={formatLabelWrap}>
-                        <FormatIcon format={fmt === "xlsx" ? "excel" : fmt} />
-                        {String(fmt).toUpperCase() === "XLSX" ? "Excel" : String(fmt).toUpperCase()}
-                      </span>
-                    </s-badge>
-                  </s-stack>
-                  {runningNow && (
+                {/* Cancel — the run's own, right-aligned, only while it runs.
+                    (Status and Format are facts in the grid below; the kind
+                    is the page heading already.) */}
+                {runningNow && (
+                  <s-grid gridTemplateColumns="1fr auto" gap="base" alignItems="center">
+                    <span />
                     <s-button
                       variant="secondary" tone="critical"
                       disabled={cancelFetcher.state !== "idle" ? true : undefined}
@@ -883,8 +1134,8 @@ export default function ImportPage() {
                     >
                       Cancel
                     </s-button>
-                  )}
-                </s-grid>
+                  </s-grid>
+                )}
 
                 {/* Live progress */}
                 {runningNow && (
@@ -916,44 +1167,106 @@ export default function ImportPage() {
                   <s-banner tone="warning">This import was cancelled. Rows already written before the cancel stay applied.</s-banner>
                 )}
 
-                {/* Run facts */}
-                {/* Facts flow inline and wrap; each fact is as wide as its
-                    content, so a long file name stays on one line instead of
-                    breaking inside a fixed 150px grid column. */}
-                <div style={factsRow}>
-                  <Fact label="ID">
-                    {jobNumber != null ? `#${jobNumber}` : <span style={mutedValue}>—</span>}
-                  </Fact>
-                  <Fact label="File">
-                    {fileUrl && preview
-                      ? <s-link href={fileUrl}>{preview.filename}</s-link>
-                      : (job?.filename ?? preview?.filename ?? "—")}
-                  </Fact>
-                  {fileSize != null && (
-                    <Fact label="File size">{humanSize(fileSize)}</Fact>
-                  )}
-                  {/* Timing facts appear once the run has values — the
-                      pre-run preview shows none. */}
-                  {!preRun && (
-                    <Fact label="Started">
-                      {job?.createdAt ? dateTime(job.createdAt, timezone) : "Just now"}
+                {/* Run facts. Before the run: 3 + 3 (Status · Format · ID /
+                    Records · Rows · Import file — the file last so its long
+                    nowrap name has no neighbour to overlap). Once the run
+                    exists: 4 + 5 (Status · Format · ID · Import file · [empty]
+                    / Started · Finished · Duration · Records · Rows), sharing
+                    one 5-column rhythm. */}
+                {(() => {
+                  const statusFact = (
+                    <Fact label="Status">
+                      {preRun ? (
+                        <s-badge tone={ready ? "success" : "warning"}>
+                          {ready ? "Ready to import" : "Nothing to import"}
+                        </s-badge>
+                      ) : (
+                        <s-badge tone={STATUS_TONE[status] ?? "info"}>
+                          {status === "complete" && (
+                            <span style={{ fontSize: ".85em", display: "inline-block", transform: "translateY(-1px)", marginRight: 3 }}>●</span>
+                          )}
+                          {STATUS_LABEL[status] ?? status}
+                        </s-badge>
+                      )}
                     </Fact>
-                  )}
-                  {finished && (
-                    <Fact label="Finished">{dateTime(job.completedAt, timezone)}</Fact>
-                  )}
-                  {!preRun && job?.createdAt && (
-                    <Fact label="Duration">{duration(job.createdAt, job.completedAt)}</Fact>
-                  )}
-                  <Fact label="Records">
-                    {tot != null ? tot.toLocaleString() : <span style={mutedValue}>—</span>}
-                  </Fact>
-                  {/* Rows in the file — explains the records count (a product
-                      spans several rows). */}
-                  {preview?.totals?.parsed != null && (
-                    <Fact label="Rows">{preview.totals.parsed.toLocaleString()}</Fact>
-                  )}
-                </div>
+                  );
+                  const formatFact = (
+                    <Fact label="Format">
+                      <span className="fmt-badge" style={formatLabelWrap}>
+                        <FormatIcon format={fmt === "xlsx" ? "excel" : fmt} />
+                        {String(fmt).toUpperCase() === "XLSX" ? "Excel" : String(fmt).toUpperCase()}
+                      </span>
+                    </Fact>
+                  );
+                  const idFact = (
+                    <Fact label="ID">
+                      {jobNumber != null ? `#${jobNumber}` : <span style={mutedValue}>—</span>}
+                    </Fact>
+                  );
+                  // The name ellipsizes when it's longer than its column; the
+                  // size never does (flex: none), so "· 7.0 kB" always shows.
+                  const fileName = preview?.filename ?? job?.filename ?? "—";
+                  const fileFact = (
+                    <Fact label="Import file" span={preRun ? undefined : 2} style={{ minWidth: 0 }}>
+                      <span style={fileValueRow} title={fileName}>
+                        <span style={fileNameCell}>
+                          {fileUrl && preview ? <s-link href={fileUrl}>{fileName}</s-link> : fileName}
+                        </span>
+                        {fileSize != null && <span style={{ ...mutedValue, flex: "none" }}>&nbsp;· {humanSize(fileSize)}</span>}
+                      </span>
+                    </Fact>
+                  );
+                  const recordsFact = (
+                    <Fact label="Records">
+                      {tot != null ? tot.toLocaleString() : <span style={mutedValue}>—</span>}
+                    </Fact>
+                  );
+                  // Rows in the file — explains the records count (a product
+                  // spans several rows).
+                  const rowsFact = preview?.totals?.parsed != null
+                    ? <Fact label="Rows">{preview.totals.parsed.toLocaleString()}</Fact>
+                    : <span aria-hidden="true" />;
+
+                  if (preRun) {
+                    return (
+                      <>
+                        {/* Both rows share a 2fr·1fr·1fr rhythm: the wide first
+                            column hosts the long file name in row two, and
+                            Status above it. */}
+                        <s-grid gridTemplateColumns="minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr)" gap="base">
+                          {statusFact}{formatFact}{idFact}
+                        </s-grid>
+                        {/* Import file first (leftmost) — its column is a
+                            wide "2fr" so the long name has room; Records and
+                            Rows take the narrower right columns. */}
+                        <s-grid gridTemplateColumns="minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr)" gap="base">
+                          {fileFact}{recordsFact}{rowsFact}
+                        </s-grid>
+                      </>
+                    );
+                  }
+                  return (
+                    <>
+                      {/* The file fact spans columns 4–5 so the long name has
+                          two columns of room and lines up with the row below. */}
+                      <s-grid gridTemplateColumns="repeat(5, minmax(0, 1fr))" gap="base">
+                        {statusFact}{formatFact}{idFact}{fileFact}
+                      </s-grid>
+                      <s-grid gridTemplateColumns="repeat(5, minmax(0, 1fr))" gap="base">
+                        <Fact label="Started">
+                          {job?.createdAt ? dateTime(job.createdAt, timezone) : "Just now"}
+                        </Fact>
+                        <Fact label="Finished">
+                          {finished ? dateTime(job.completedAt, timezone) : <span style={mutedValue}>—</span>}
+                        </Fact>
+                        <Fact label="Duration">
+                          {job?.createdAt ? duration(job.createdAt, job.completedAt) : <span style={mutedValue}>—</span>}
+                        </Fact>
+                        {recordsFact}{rowsFact}
+                      </s-grid>
+                    </>
+                  );
+                })()}
               </s-stack>
             </s-section>
           );
@@ -1523,10 +1836,10 @@ export default function ImportPage() {
         .entity-pop-list::-webkit-scrollbar-track { background: transparent; }
         /* Format icon shrunk to badge-glyph size inside the status chips. */
         .fmt-badge svg { width: 12px; height: 12px; }
-        /* Progress bar — the run page's: fill tweens over ~the 2s polling
-           interval so it glides between updates. */
+        /* Progress bar — the run page's; a short ease so each update snaps
+           forward promptly rather than dragging behind the next poll. */
         .jp-track { height: 6px; border-radius: 3px; background: #e3e5e7; overflow: hidden; position: relative; }
-        .jp-fill { height: 100%; border-radius: 3px; background: #1a1a1a; transition: width 1.8s linear; }
+        .jp-fill { height: 100%; border-radius: 3px; background: #1a1a1a; transition: width .35s ease-out; }
         .jp-pulse { position: absolute; inset: 0; width: 40%; border-radius: 3px; background: #1a1a1a; animation: jp-indeterminate 1.4s infinite linear; }
         @keyframes jp-indeterminate { 0% { transform: translateX(-120%); } 100% { transform: translateX(320%); } }
       `}</style>
@@ -1834,9 +2147,9 @@ function SheetCard({ sheet, plan, sheetIndex, onPlan, onFilters, onColumns, disa
 }
 
 /** One run fact: small uppercase label over its value (the run page's). */
-function Fact({ label, children }) {
+function Fact({ label, children, span, style }) {
   return (
-    <div style={{ minWidth: 120 }}>
+    <div style={{ minWidth: 120, ...(span ? { gridColumn: `span ${span}` } : null), ...style }}>
       <s-stack direction="block" gap="small-500">
         <span style={factLabel}>{label}</span>
         <span style={factValue}>{children}</span>
@@ -1893,13 +2206,12 @@ const factLabel = {
   fontSize: ".6875rem", fontWeight: 600, textTransform: "uppercase",
   letterSpacing: ".04em", color: "#8a9199",
 };
+// nowrap keeps the file name on one line; the 5-column grid gives it room.
 const factValue = { fontSize: ".875rem", whiteSpace: "nowrap" };
 const mutedValue = { color: "#8a9199" };
-// Facts flow inline (min 150px each, growing to fit) and wrap onto the next
-// line as a group — no fixed-width columns to break a long value inside.
-const factsRow = {
-  display: "flex", flexWrap: "wrap", gap: "1rem 2rem", alignItems: "start",
-};
+// Import-file value: name (ellipsizes) + size (never shrinks) on one line.
+const fileValueRow = { display: "flex", alignItems: "baseline", minWidth: 0, maxWidth: "100%" };
+const fileNameCell = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
 // Format icon + name as one inline unit in the status row.
 const formatLabelWrap = {
   display: "inline-flex", alignItems: "center", gap: ".35rem", verticalAlign: "middle",

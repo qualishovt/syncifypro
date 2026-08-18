@@ -19,7 +19,6 @@ import { FIELDS_BY_ENTITY, FIELD_LABELS } from "../export/fieldLists.js";
 import SharedTextField from "../components/PolarisTextField.jsx";
 import PolarisCheckbox from "../components/PolarisCheckbox.jsx";
 import FormatIcon from "../components/FormatIcon.jsx";
-import { ExportIcon, ImportIcon } from "../components/JobKindIcons.jsx";
 
 // ─── Loader ────────────────────────────────────────────────────────────────────
 
@@ -443,21 +442,7 @@ export default function JobPage() {
                     (disabled) Cancel button — so nothing shifts when the
                     real job data replaces this shell. */}
                 <s-grid gridTemplateColumns="1fr auto" gap="base" alignItems="center">
-                  <s-stack direction="inline" gap="small-200" alignItems="center">
-                    <s-badge tone="info">Starting</s-badge>
-                    <s-badge>
-                      <span className="fmt-badge" style={formatLabelWrap}>
-                        <ExportIcon />
-                        Export
-                      </span>
-                    </s-badge>
-                    <s-badge>
-                      <span className="fmt-badge" style={formatLabelWrap}>
-                        <FormatIcon format={startPayload.format} />
-                        {FORMAT_LABELS[startPayload.format] ?? String(startPayload.format ?? "").toUpperCase()}
-                      </span>
-                    </s-badge>
-                  </s-stack>
+                  <span />
                   <s-stack direction="inline" gap="small-200">
                     <s-button variant="secondary" tone="critical" disabled>Cancel</s-button>
                   </s-stack>
@@ -478,33 +463,22 @@ export default function JobPage() {
                 {/* The same facts grid as the live view, so the page arrives
                     whole — known values filled from the start payload, the
                     rest as placeholders that fill in as data lands. */}
-                <s-grid gridTemplateColumns="repeat(auto-fit, minmax(150px, 1fr))" gap="base">
+                <s-grid gridTemplateColumns="repeat(4, minmax(0, 1fr))" gap="base">
+                  <Fact label="Status"><s-badge tone="info">Starting</s-badge></Fact>
+                  <Fact label="Format">
+                    <span className="fmt-badge" style={formatLabelWrap}>
+                      <FormatIcon format={startPayload.format} />
+                      {FORMAT_LABELS[startPayload.format] ?? String(startPayload.format ?? "").toUpperCase()}
+                    </span>
+                  </Fact>
                   <Fact label="ID"><span style={mutedValue}>—</span></Fact>
-                  {/* Format lives in the status-row badge above, not here. */}
                   <Fact label="Started">Just now</Fact>
                   <Fact label="Finished"><span style={mutedValue}>—</span></Fact>
                   <Fact label="Duration"><span style={mutedValue}>—</span></Fact>
                   <Fact label="Records"><span style={mutedValue}>—</span></Fact>
-                  {/* The option facts too — the live grid shows them, so the
-                      shell must as well or the card grows a row on swap. The
-                      start payload already knows every value. */}
-                  <Fact label="File name">
-                    {startPayload.options?.filename || <span style={mutedValue}>Automatic</span>}
-                  </Fact>
-                  <Fact label="Split into files">
-                    {startPayload.splitRows
-                      ? `${Number(startPayload.splitRows).toLocaleString()} records`
-                      : <span style={mutedValue}>Off</span>}
-                  </Fact>
-                  <Fact label="ZIP archive">
-                    {startPayload.options?.zip ? "Yes" : <span style={mutedValue}>No</span>}
-                  </Fact>
-                  <Fact label="Skip when empty">
-                    {startPayload.options?.skipEmpty ? "Yes" : <span style={mutedValue}>No</span>}
-                  </Fact>
-                  <Fact label="Email when done">
-                    {startPayload.options?.emailTo || <span style={mutedValue}>—</span>}
-                  </Fact>
+                  <Fact label="Rows"><span style={mutedValue}>—</span></Fact>
+                  {/* The advanced options live in the Advanced card below —
+                      not repeated here (matches the live grid). */}
                 </s-grid>
               </>
             ) : (
@@ -668,7 +642,7 @@ export default function JobPage() {
 
           {/* On-demand delivery, right in the banner. */}
           <PrefetchPageLinks page="/app/servers" />
-          <div style={{ marginTop: "2rem" }}>
+          <div style={{ marginTop: "1.25rem" }}>
             <span style={deliverLabel}>Deliver to</span>
             <div style={fieldHelpWrap}>
               <s-grid gridTemplateColumns="auto 1fr auto" gap="small-200" alignItems="center">
@@ -828,42 +802,22 @@ export default function JobPage() {
       <s-section>
         <s-stack direction="block" gap="base">
 
-          {/* ── Status head ── */}
-          <s-grid gridTemplateColumns="1fr auto" gap="base" alignItems="center">
-            <s-stack direction="inline" gap="small-200" alignItems="center">
-              <s-badge tone={STATUS_TONE[job.status] ?? "info"}>
-                {job.status === "complete" && (
-                  <span style={{ fontSize: ".85em", display: "inline-block", transform: "translateY(-1px)", marginRight: 3 }}>●</span>
-                )}
-                {STATUS_LABEL[job.status] ?? job.status}
-              </s-badge>
-              <s-badge>
-                <span className="fmt-badge" style={formatLabelWrap}>
-                  {job.kind === "export" ? <ExportIcon /> : <ImportIcon />}
-                  {job.kind === "export" ? "Export" : "Import"}
-                </span>
-              </s-badge>
-              <s-badge>
-                <span className="fmt-badge" style={formatLabelWrap}>
-                  <FormatIcon format={job.format} />
-                  {FORMAT_LABELS[job.format] ?? String(job.format).toUpperCase()}
-                </span>
-              </s-badge>
-            </s-stack>
-            <s-stack direction="inline" gap="small-200">
-              {/* Export/Import again moved to the title bar; only the run's
-                  own Cancel stays next to the progress it belongs to. */}
-              {running && (
-                <s-button
-                  variant="secondary" tone="critical"
-                  disabled={busy ? true : undefined}
-                  onClick={() => actionFetcher.submit({ intent: "cancel", kind: job.kind }, { method: "post" })}
-                >
-                  Cancel
-                </s-button>
-              )}
-            </s-stack>
-          </s-grid>
+          {/* ── Cancel — the run's own, right-aligned, only while it runs.
+              (Status and Format are facts in the grid below; the kind is
+              the page heading already.) Rendered only when needed so a
+              finished card has no empty strip at the top. ── */}
+          {running && (
+            <s-grid gridTemplateColumns="1fr auto" gap="base" alignItems="center">
+              <span />
+              <s-button
+                variant="secondary" tone="critical"
+                disabled={busy ? true : undefined}
+                onClick={() => actionFetcher.submit({ intent: "cancel", kind: job.kind }, { method: "post" })}
+              >
+                Cancel
+              </s-button>
+            </s-grid>
+          )}
 
           {/* ── Live progress (held through `finishing` so the bar lands) ── */}
           {(running || finishing) && (() => {
@@ -913,46 +867,48 @@ export default function JobPage() {
             </s-banner>
           )}
 
-          {/* ── Run facts ── */}
-          <s-grid gridTemplateColumns="repeat(auto-fit, minmax(150px, 1fr))" gap="base">
+          {/* ── Run facts — a fixed 4-up grid so the eight facts split evenly
+              (4 + 4). Status keeps its badge; Format keeps its icon. ── */}
+          <s-grid gridTemplateColumns="repeat(4, minmax(0, 1fr))" gap="base">
+            <Fact label="Status">
+              <s-badge tone={STATUS_TONE[job.status] ?? "info"}>
+                {job.status === "complete" && (
+                  <span style={{ fontSize: ".85em", display: "inline-block", transform: "translateY(-1px)", marginRight: 3 }}>●</span>
+                )}
+                {STATUS_LABEL[job.status] ?? job.status}
+              </s-badge>
+            </Fact>
+            <Fact label="Format">
+              <span className="fmt-badge" style={formatLabelWrap}>
+                <FormatIcon format={job.format} />
+                {FORMAT_LABELS[job.format] ?? String(job.format).toUpperCase()}
+              </span>
+            </Fact>
             <Fact label="ID">{job.number != null ? `#${job.number}` : "—"}</Fact>
-            {/* Format lives in the status-row badge above, not here. */}
             {/* Exports list their sheets in the dedicated Sheets card below. */}
             {job.kind === "import" && <Fact label="File">{job.filename ?? "—"}</Fact>}
             <Fact label="Started">{dateTime(job.createdAt, timezone)}</Fact>
             <Fact label="Finished">{dateTime(job.completedAt, timezone)}</Fact>
             <Fact label="Duration">{duration(job.createdAt, job.completedAt)}</Fact>
             {job.kind === "export" ? (
-              <Fact label="Records">{job.rowCount != null ? job.rowCount.toLocaleString() : "—"}</Fact>
+              <>
+                {/* Items = records exported (a product with its variants is
+                    one); Rows = lines written to the file. */}
+                <Fact label="Records">
+                  {job.status === "complete" && (job.progressCurrent ?? 0) > 0
+                    ? job.progressCurrent.toLocaleString()
+                    : <span style={mutedValue}>—</span>}
+                </Fact>
+                <Fact label="Rows">{job.rowCount != null ? job.rowCount.toLocaleString() : <span style={mutedValue}>—</span>}</Fact>
+              </>
             ) : (
               <Fact label="Result">
                 {`${job.created ?? 0} new · ${job.updated ?? 0} updated · ${job.deleted ?? 0} deleted`}
                 {job.failedRows ? ` · ${job.failedRows} failed` : ""}
               </Fact>
             )}
-            {/* The run's advanced options, as they were applied — defaults
-                stay muted so the non-default choices stand out. */}
-            {job.kind === "export" && job.options && (
-              <>
-                <Fact label="File name">
-                  {job.options.filename || <span style={mutedValue}>Automatic</span>}
-                </Fact>
-                <Fact label="Split into files">
-                  {job.options.splitRows
-                    ? `${Number(job.options.splitRows).toLocaleString()} records`
-                    : <span style={mutedValue}>Off</span>}
-                </Fact>
-                <Fact label="ZIP archive">
-                  {job.options.zip ? "Yes" : <span style={mutedValue}>No</span>}
-                </Fact>
-                <Fact label="Skip when empty">
-                  {job.options.skipEmpty ? "Yes" : <span style={mutedValue}>No</span>}
-                </Fact>
-                <Fact label="Email when done">
-                  {job.options.emailTo || <span style={mutedValue}>—</span>}
-                </Fact>
-              </>
-            )}
+            {/* The run's advanced options live in the Advanced card below —
+                not repeated here. */}
           </s-grid>
 
         </s-stack>
@@ -1293,7 +1249,7 @@ function humanSize(bytes) {
 function dateTime(isoStr, tz = "UTC") {
   if (!isoStr) return "—";
   return new Date(isoStr).toLocaleString(undefined, {
-    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit",
     hour12: false, timeZone: tz || "UTC",
   });
 }
@@ -1316,7 +1272,7 @@ const downloadFileRow = {
 // The filename set apart from the surrounding text: monospace, bold, dark.
 const downloadFile = {
   fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
-  fontWeight: 400, fontSize: ".9rem", color: "#202223",
+  fontWeight: 600, fontSize: ".9rem", color: "#202223",
   wordBreak: "break-all",
 };
 

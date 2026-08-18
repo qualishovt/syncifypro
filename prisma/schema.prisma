@@ -240,6 +240,24 @@ model EtsyConnection {
   updatedAt    DateTime @updatedAt
 }
 
+// A saved key/secret connection to a source platform (WooCommerce, Magento,
+// …) — one per shop+platform, so "Connected" survives a page reload and the
+// merchant can re-run a migration without re-entering keys. `creds` is the
+// platform's field map as JSON with the secret fields AES-encrypted (same as
+// ImportServer passwords). Etsy (OAuth) has its own table.
+model MigrationConnection {
+  id          String   @id @default(cuid())
+  shop        String
+  platform    String   // woocommerce | bigcommerce | magento | prestashop
+  creds       String   // JSON, secret fields encrypted
+  label       String?  // e.g. the store's host, for display
+  connectedAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([shop, platform])
+  @@index([shop])
+}
+
 // Short-lived state for the Etsy OAuth handshake — bridges the authorize
 // redirect and the callback (holds the PKCE verifier + which shop started it).
 model MigrationOAuthState {

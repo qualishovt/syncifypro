@@ -92,6 +92,63 @@ export async function validateBigC(creds) {
   return { ok: true, counts: { products, customers, orders, collections } };
 }
 
+// ─── filters ──────────────────────────────────────────────────────────────────
+
+// BigCommerce order status names → V2 status_id (used for client-side matching too).
+export const BC_ORDER_STATUSES = [
+  "Pending", "Awaiting Payment", "Awaiting Fulfillment", "Awaiting Shipment", "Awaiting Pickup",
+  "Partially Shipped", "Shipped", "Completed", "Cancelled", "Declined", "Refunded", "Partially Refunded",
+  "Disputed", "Manual Verification Required", "Incomplete",
+];
+
+const day = (v) => (typeof v === "string" && v.trim() ? new Date(`${v.trim()}T00:00:00Z`) : null);
+const list = (v) => (Array.isArray(v) ? v.map((x) => String(x).trim()).filter(Boolean) : []);
+const inRange = (iso, after, before) => {
+  if (!after && !before) return true;
+  const t = iso ? new Date(iso).getTime() : NaN;
+  if (Number.isNaN(t)) return false;
+  return (!after || t >= after.getTime()) && (!before || t < before.getTime());
+};
+
+/**
+ * Map the page's filters to BigCommerce: query params where the API supports
+ * them, plus a client-side predicate for the rest (products have no
+ * date_created filter; V2 orders take one status_id at a time).
+ * @returns {{ query: string, keep: (rec: object) => boolean }}
+ */
+export function bcFilters(entity, filters = {}) {
+  const q = [];
+  let keep = () => true;
+  if (entity === "products") {
+    const st = list(filters.product_status).map((s) => s.toLowerCase());
+    if (st.length === 1 && (st[0] === "visible" || st[0] === "hidden")) q.push(`is_visible=${st[0] === "visible"}`);
+    const cA = day(filters.product_created_after), cB = day(filters.product_created_before);
+    const uA = day(filters.product_updated_after), uB = day(filters.product_updated_before);
+    if (uA) q.push(`date_modified:min=${encodeURIComponent(uA.toISOString())}`);
+    if (uB) q.push(`date_modified:max=${encodeURIComponent(uB.toISOString())}`);
+    keep = (p) => inRange(p.date_created, cA, cB);
+  } else if (entity === "orders") {
+    const st = new Set(list(filters.order_status).map((s) => s.toLowerCase()));
+    const cA = day(filters.order_created_after), cB = day(filters.order_created_before);
+    const uA = day(filters.order_updated_after), uB = day(filters.order_updated_before);
+    if (cA) q.push(`min_date_created=${encodeURIComponent(cA.toUTCString())}`);
+    if (cB) q.push(`max_date_created=${encodeURIComponent(cB.toUTCString())}`);
+    if (uA) q.push(`min_date_modified=${encodeURIComponent(uA.toUTCString())}`);
+    if (uB) q.push(`max_date_modified=${encodeURIComponent(uB.toUTCString())}`);
+    // max_date_* is inclusive on the API; the predicate keeps our "before" strict.
+    keep = (o) => (!st.size || st.has(String(o.status || "").toLowerCase())) && inRange(o.date_created, cA, cB);
+  } else if (entity === "customers") {
+    const cA = day(filters.customer_created_after), cB = day(filters.customer_created_before);
+    const uA = day(filters.customer_updated_after), uB = day(filters.customer_updated_before);
+    if (cA) q.push(`date_created:min=${encodeURIComponent(cA.toISOString())}`);
+    if (cB) q.push(`date_created:max=${encodeURIComponent(cB.toISOString())}`);
+    if (uA) q.push(`date_modified:min=${encodeURIComponent(uA.toISOString())}`);
+    if (uB) q.push(`date_modified:max=${encodeURIComponent(uB.toISOString())}`);
+    keep = (c) => inRange(c.date_created, cA, cB);
+  }
+  return { query: q.length ? `&${q.join("&")}` : "", keep };
+}
+
 // ─── mapping helpers ───────────────────────────────────────────────────────────
 
 function slug(s) { return String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""); }
@@ -135,9 +192,10 @@ async function categoryNameMap(creds) {
 
 // ─── fetchers ───────────────────────────────────────────────────────────────────
 
-export async function fetchBigCProducts(creds, onProgress) {
+export async function fetchBigCProducts(creds, onProgress, filters = {}) {
   const catMap = await categoryNameMap(creds);
-  const products = await getV3All(creds, "catalog/products?include=variants,images", onProgress);
+  const f = bcFilters("products", filters);
+  const products = (await getV3All(creds, `catalog/products?include=variants,images${f.query}`, onProgress)).filter(f.keep);
   const rows = [];
   let rn = 1;
 
@@ -192,8 +250,9 @@ export async function fetchBigCCategories(creds, onProgress) {
   })).filter((r) => r.title);
 }
 
-export async function fetchBigCCustomers(creds, onProgress) {
-  const customers = await getV3All(creds, "customers", onProgress);
+export async function fetchBigCCustomers(creds, onProgress, filters = {}) {
+  const f = bcFilters("customers", filters);
+  const customers = (await getV3All(creds, `customers${f.query ? "?" + f.query.slice(1) : ""}`, onProgress)).filter(f.keep);
   let addrs = [];
   try { addrs = await getV3All(creds, "customers/addresses"); } catch { addrs = []; }
   const byCustomer = new Map();
@@ -223,8 +282,9 @@ const BC_FINANCIAL = {
   Cancelled: "VOIDED", Declined: "VOIDED",
 };
 
-export async function fetchBigCOrders(creds, onProgress) {
-  const orders = await getV2All(creds, "orders", onProgress);
+export async function fetchBigCOrders(creds, onProgress, filters = {}) {
+  const f = bcFilters("orders", filters);
+  const orders = (await getV2All(creds, `orders${f.query ? "?" + f.query.slice(1) : ""}`, onProgress)).filter(f.keep);
   const rows = [];
   let rn = 1;
 

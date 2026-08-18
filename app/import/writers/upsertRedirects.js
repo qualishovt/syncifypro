@@ -66,7 +66,22 @@ async function writeRow(row, admin, result) {
       return { status: "updated", comment: "" };
     }
     const ue = await run(admin, CREATE, { redirect: { path: row.path, target: row.target } }, "urlRedirectCreate");
-    if (ue.length) { result.errors.push({ path: label, userErrors: ue }); return { status: "failed", comment: msgs(ue) }; }
+    if (ue.length) {
+      // MERGE/UPDATE semantics without an ID: the path already exists →
+      // find that redirect and update its target (re-importing the same
+      // file, or pointing an old URL somewhere new). NEW keeps the error.
+      if (row.command !== "NEW" && isTaken(ue)) {
+        const existing = await findByPath(admin, row.path);
+        if (existing) {
+          const ue2 = await run(admin, UPDATE, { id: existing, redirect: { path: row.path, target: row.target } }, "urlRedirectUpdate");
+          if (ue2.length) { result.errors.push({ path: label, userErrors: ue2 }); return { status: "failed", comment: msgs(ue2) }; }
+          result.updated++;
+          return { status: "updated", comment: "" };
+        }
+      }
+      result.errors.push({ path: label, userErrors: ue });
+      return { status: "failed", comment: msgs(ue) };
+    }
     result.created++;
     return { status: "created", comment: "" };
   } catch (err) {
@@ -81,6 +96,25 @@ function msgs(errs) {
 }
 
 // ─── helpers ────────────────────────────────────────────────────────────────
+
+const FIND_BY_PATH = `#graphql
+  query FindRedirect($query: String!) {
+    urlRedirects(first: 1, query: $query) { nodes { id path } }
+  }
+`;
+
+/** True when the create failed only because the path already exists. */
+function isTaken(userErrors) {
+  return userErrors.some((e) => /already been taken/i.test(e.message ?? ""));
+}
+
+/** The existing redirect's id for an exact path, or null. */
+async function findByPath(admin, path) {
+  const res = await admin.graphql(FIND_BY_PATH, { variables: { query: `path:${JSON.stringify(path)}` } });
+  const { data } = await res.json();
+  const hit = (data?.urlRedirects?.nodes ?? []).find((n) => n.path === path);
+  return hit?.id ?? null;
+}
 
 async function run(admin, mutation, variables, field) {
   const res = await admin.graphql(mutation, { variables });

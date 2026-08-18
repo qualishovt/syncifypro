@@ -103,6 +103,25 @@ test("builder falls back to handle identifier when no id", () => {
   assert.equal(input.id, undefined); // handle identifiers don't set input.id
 });
 
+test("single-variant product with no Option columns gets Title / Default Title", () => {
+  // A WooCommerce "simple" product: sku + price, no options at all. productSet
+  // rejects a variant with null optionValues, so the builder must supply
+  // Shopify's implicit option.
+  const { input } = buildProductSetInput([{
+    top_row: "TRUE", command: "MERGE", handle: "cap", title: "Cap", sku: "CAP-1", price: "12.00",
+  }]);
+  assert.deepEqual(input.productOptions, [{ name: "Title", values: [{ name: "Default Title" }] }]);
+  assert.equal(input.variants.length, 1);
+  assert.deepEqual(input.variants[0].optionValues, [{ optionName: "Title", name: "Default Title" }]);
+  assert.equal(input.variants[0].sku, "CAP-1");
+});
+
+test("products with real options are left untouched by the default-option fallback", () => {
+  const { input } = buildProductSetInput(productGroup());
+  assert.equal(input.productOptions.length, 1);
+  assert.equal(input.productOptions[0].name, "Color");
+});
+
 test("validator: record-aware, keeps whole valid groups", () => {
   const { valid, errors } = validateProductRows(productGroup());
   assert.equal(errors.length, 0);

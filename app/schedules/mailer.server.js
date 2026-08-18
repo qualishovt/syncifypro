@@ -6,6 +6,11 @@
  * (not an error), so schedules still advance without an email provider.
  */
 
+/** True when an email provider is configured (the UI hides/disable email delivery otherwise). */
+export function emailConfigured() {
+  return Boolean(process.env.RESEND_API_KEY);
+}
+
 import { Buffer } from "node:buffer";
 
 export async function sendScheduleEmail({ to, subject, text, attachment }) {

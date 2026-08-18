@@ -55,6 +55,7 @@ import { toShopifyCSV }                from "./formats/shopifyCsv.js";
 import { toGoogleFeed }                from "./formats/googleFeed.js";
 import { zipParts }                    from "./formats/zip.js";
 import { uploadToR2 }                  from "./delivery/r2.js";
+import { fileStamp }                   from "../utils/fileStamp.js";
 import { createBulkExportJob,
          markJobRunning,
          markJobComplete,
@@ -227,7 +228,7 @@ export async function runExportJob({ admin, shop, entity, format, filters = {}, 
 
   const mimeType  = MIME_TYPES[format] ?? "application/octet-stream";
   const now       = new Date();
-  const timestamp = now.toISOString().slice(0, 19).replace("T", "-").replace(/:/g, "");
+  const timestamp = fileStamp(now);
   const filename  = `${capitalize(entity)}-${timestamp}.${EXTENSION[format] ?? format}`;
 
   // Build the Shopify search query from the filter object
@@ -329,7 +330,7 @@ export async function runMultiEntityExport({ admin, shop, specs, format }) {
   }
 
   // 2. Bundle into a single deliverable.
-  const timestamp = new Date().toISOString().slice(0, 19).replace("T", "-").replace(/:/g, "");
+  const timestamp = fileStamp();
   let buffer, filename, mimeType;
 
   if (format === "excel") {
@@ -663,7 +664,8 @@ export async function runExportForJob({ admin, shop, jobId, specs, format, split
  */
 export function renderExportFilename(template, { shop = "", ext = "csv", now = new Date() } = {}) {
   const date = now.toISOString().slice(0, 10);
-  const time = now.toISOString().slice(11, 16).replace(":", "");
+  // {time} = HHMMSS, no separators — same as the automatic file names.
+  const time = now.toISOString().slice(11, 19).replace(/:/g, "");
   let out = String(template).trim()
     .replace(/\{date\}/gi, date)
     .replace(/\{time\}/gi, time)
@@ -804,7 +806,7 @@ async function processTrackedExportInner({ admin, shop, job, specs, format, spli
   for (const r of results) r.rows = applyValueFormatting(r.rows, format, options);
 
   // Bundle: single entity → one file; multiple → zip (or one Excel workbook).
-  const timestamp = new Date().toISOString().slice(0, 19).replace("T", "-").replace(/:/g, "");
+  const timestamp = fileStamp();
   const rowCount = results.reduce((sum, r) => sum + r.rows.length, 0);
   let buffer, filename, mimeType;
 

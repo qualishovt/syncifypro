@@ -216,7 +216,8 @@ const slugify = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-")
  */
 export function renderScheduleFilename(sch, ext, now = new Date()) {
   const date = now.toISOString().slice(0, 10);
-  const time = now.toISOString().slice(11, 16).replace(":", "");
+  // {time} = HHMMSS, no separators — same as the automatic file names.
+  const time = now.toISOString().slice(11, 19).replace(/:/g, "");
   const template = String(sch.filename || "").trim();
   let out = template
     ? template

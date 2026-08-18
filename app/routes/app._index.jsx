@@ -120,7 +120,8 @@ export async function action({ request }) {
  */
 async function stageAndRedirect({ shop, buffer, filename, mimeType }) {
   const { putToR2 } = await import("../export/delivery/r2.js");
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const { fileStamp } = await import("../utils/fileStamp.js");
+  const stamp = fileStamp();
   const safeName = String(filename).replace(/[^\w.-]+/g, "_");
   const key = `imports/${shop}/${stamp}-${safeName}`;
   await putToR2({ buffer, key, mimeType });

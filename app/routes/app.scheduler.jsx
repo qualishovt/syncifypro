@@ -102,6 +102,9 @@ export async function loader({ request }) {
       connected: Boolean(conn?.refreshToken),
       email: conn?.email || "",
     },
+    // Email delivery needs a Resend key on the server; without it sends are
+    // skipped, so the UI must say so instead of letting merchants rely on it.
+    emailConfigured: (await import("../schedules/mailer.server.js")).emailConfigured(),
   };
 }
 
@@ -431,7 +434,7 @@ const BLANK = {
 // ─── UI ─────────────────────────────────────────────────────────────────────────
 
 export default function SchedulerPage() {
-  const { schedules, history, presets, importPresets, servers, google, shop, blockedEntities } = useLoaderData();
+  const { schedules, history, presets, importPresets, servers, google, shop, blockedEntities, emailConfigured } = useLoaderData();
   const navigate = useNavigate();
 
   // Sheet Permissions (Settings): entities blocked there are hidden here too,
@@ -1105,15 +1108,24 @@ export default function SchedulerPage() {
             {deliveryTab === "email" && (
               <s-box border="base" borderRadius="base" padding="base">
                 <s-stack direction="block" gap="base">
+                  {/* No email provider on the server → say so up front rather
+                      than let a schedule "send" nothing. */}
+                  {!emailConfigured && (
+                    <s-banner tone="warning">
+                      Email delivery isn’t available on this installation yet — files can still be delivered by FTP, S3 or Google, and downloaded from Activity.
+                    </s-banner>
+                  )}
                   <PolarisSwitch
                     label="Send via email"
-                    checked={form.emailOn}
+                    checked={emailConfigured && form.emailOn}
+                    disabled={!emailConfigured}
                     onChange={(checked) => set({ emailOn: checked })}
                   />
                   <PolarisTextField
                     label="Email recipients"
                     placeholder="comma-separated, e.g. owner@store.com, ops@store.com"
                     value={form.recipients}
+                    disabled={!emailConfigured}
                     onChange={(v) => set({ recipients: v })}
                   />
                 </s-stack>

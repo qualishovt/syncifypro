@@ -21,6 +21,9 @@ import { COMMAND, parseCommand } from "../command.js";
 import { topRow } from "../assemble.js";
 
 const STATUSES = new Set(["ACTIVE", "DRAFT", "ARCHIVED"]);
+// Shopify's implicit option for products that have no real options.
+const DEFAULT_OPTION = "Title";
+const DEFAULT_OPTION_VALUE = "Default Title";
 
 const WEIGHT_UNIT = {
   KILOGRAMS: "KILOGRAMS", KG: "KILOGRAMS",
@@ -184,9 +187,20 @@ export function buildProductSetInput(group) {
   if (clean(top.category_id)) input.category = toGid("TaxonomyCategory", top.category_id);
 
   const options = buildOptions(group);
-  if (options.length) input.productOptions = options;
-
   const variants = group.filter(isVariantRow).map(buildVariant).filter((v) => Object.keys(v).length);
+
+  // A single-variant product with no Option columns (WooCommerce "simple"
+  // products, hand-written sheets) still needs option values — productSet
+  // rejects a variant whose optionValues is null. Use Shopify's own
+  // convention for such products: option "Title" with value "Default Title"
+  // (exactly what its CSV export writes), applied only where the sheet gave
+  // no options at all.
+  if (options.length === 0 && variants.length > 0 && variants.every((v) => !v.optionValues)) {
+    options.push({ name: DEFAULT_OPTION, values: [{ name: DEFAULT_OPTION_VALUE }] });
+    for (const v of variants) v.optionValues = [{ optionName: DEFAULT_OPTION, name: DEFAULT_OPTION_VALUE }];
+  }
+
+  if (options.length) input.productOptions = options;
   if (variants.length) input.variants = variants;
 
   const productMetafields = metafieldsFrom(top, { variant: false });

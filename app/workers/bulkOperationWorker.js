@@ -28,6 +28,7 @@ import { createInterface } from "readline";
 import { Readable }        from "stream";
 
 import { BULK_RECONCILE } from "../export/entities/bulk.js";
+import { fileStamp } from "../utils/fileStamp.js";
 import { FIELDS_BY_ENTITY } from "../export/fieldLists.js";
 import { columnHeader } from "../export/formats/columns.js";
 import { fetchCatalogData } from "../export/entities/catalogPrices.js";
@@ -61,7 +62,7 @@ const MIME_TYPES = {
  */
 export async function processBulkOperation({ jobId, jsonlUrl, entity, format, shop, fields, admin }) {
   const mimeType  = MIME_TYPES[format] ?? "application/octet-stream";
-  const timestamp = new Date().toISOString().slice(0, 19).replace("T", "-").replace(/:/g, "");
+  const timestamp = fileStamp();
   // Capital first letter, matching the tracked-path file names.
   const entityName = entity.charAt(0).toUpperCase() + entity.slice(1);
   const filename  = `${entityName}-${timestamp}.${format}`;

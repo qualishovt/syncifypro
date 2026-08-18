@@ -15,7 +15,7 @@ import { toExcelWorkbook } from "../export/formats/excel.js";
 import { putToR2 } from "../export/delivery/r2.js";
 import {
   validateWoo, fetchWooProducts, fetchWooCustomers, fetchWooOrders,
-  fetchWooCategories, fetchWooCoupons,
+  fetchWooCategories, fetchWooCoupons, fetchWooRedirects,
 } from "./woocommerce.server.js";
 import {
   validateBigC, fetchBigCProducts, fetchBigCCustomers, fetchBigCOrders,
@@ -23,7 +23,7 @@ import {
 } from "./bigcommerce.server.js";
 import {
   validateMagento, fetchMagentoProducts, fetchMagentoCustomers, fetchMagentoOrders,
-  fetchMagentoCategories, fetchMagentoCoupons,
+  fetchMagentoCategories, fetchMagentoCoupons, fetchMagentoRedirects,
 } from "./magento.server.js";
 import {
   validatePresta, fetchPrestaProducts, fetchPrestaCustomers, fetchPrestaOrders,
@@ -72,18 +72,24 @@ const SHEET_SPECS = {
     columns: ["command", "codes", "title", "value_type", "value", "ends_at", "usage_limit",
       "once_per_customer", "minimum_subtotal"],
   },
+  // Generated (not migrated): old platform URL paths → the same handles in
+  // Shopify, so old links and search rankings survive the move.
+  redirects: {
+    name: "Redirects",
+    columns: ["command", "path", "target"],
+  },
 };
 
 // Canonical order: products before collections so products get tagged with their
 // categories first (smart collections then auto-populate from those tags).
-const ENTITY_ORDER = ["products", "customers", "orders", "collections", "discounts"];
+const ENTITY_ORDER = ["products", "customers", "orders", "collections", "discounts", "redirects"];
 
 const CONNECTORS = {
   woocommerce: {
     validate: validateWoo,
     fetch: {
       products: fetchWooProducts, customers: fetchWooCustomers, orders: fetchWooOrders,
-      collections: fetchWooCategories, discounts: fetchWooCoupons,
+      collections: fetchWooCategories, discounts: fetchWooCoupons, redirects: fetchWooRedirects,
     },
   },
   bigcommerce: {
@@ -97,7 +103,7 @@ const CONNECTORS = {
     validate: validateMagento,
     fetch: {
       products: fetchMagentoProducts, customers: fetchMagentoCustomers, orders: fetchMagentoOrders,
-      collections: fetchMagentoCategories, discounts: fetchMagentoCoupons,
+      collections: fetchMagentoCategories, discounts: fetchMagentoCoupons, redirects: fetchMagentoRedirects,
     },
   },
   prestashop: {
@@ -151,7 +157,7 @@ export async function validateConnection(platform, creds) {
  * Run a migration and stage the resulting import file.
  * @returns {Promise<{ key: string, name: string, sheets: {entity: string, count: number}[] }>}
  */
-export async function runMigration({ platform, creds, entities, shop }) {
+export async function runMigration({ platform, creds, entities, shop, filters = {} }) {
   const conn = CONNECTORS[platform];
   if (!conn) throw new Error("That platform isn’t connected yet.");
 
@@ -162,14 +168,17 @@ export async function runMigration({ platform, creds, entities, shop }) {
     const fetchFn = conn.fetch[entity];
     const spec = SHEET_SPECS[entity];
     if (!fetchFn || !spec) continue;
-    const rows = await fetchFn(creds);
+    // Filters limit what the source sends back (connectors that don't
+    // support them just ignore the third argument).
+    const rows = await fetchFn(creds, undefined, filters);
     if (rows.length) sheets.push({ name: spec.name, rows, columns: spec.columns });
   }
 
   if (sheets.length === 0) throw new Error("No records found to migrate for the selected data.");
 
   const buffer = toExcelWorkbook(sheets);
-  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  const { fileStamp } = await import("../utils/fileStamp.js");
+  const stamp = fileStamp();
   const name = `${platform}-migration-${stamp}.xlsx`;
   const key = `imports/${shop}/migrations/${stamp}-${platform}.xlsx`;
   await putToR2({ buffer, key, mimeType: XLSX_MIME });
