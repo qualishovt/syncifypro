@@ -34,7 +34,10 @@ export async function loader({ request }) {
   const { exchangeCode, fetchShop } = await import("../migrations/etsy.server.js");
 
   const st = await takeOAuthState(state);
-  if (!st) return page(`<p>This sign-in link expired. Please try connecting again.</p>${closer}`);
+  if (!st) {
+    console.error("[etsy-callback] no OAuth state found for", state);
+    return page(`<p>This sign-in link expired. Please try connecting again.</p>${closer}`);
+  }
 
   try {
     const t = await exchangeCode({ keystring: st.keystring, redirectUri: st.redirectUri, code, verifier: st.codeVerifier });
@@ -47,6 +50,7 @@ export async function loader({ request }) {
     });
     return page(`<p><strong>Connected${shopName ? ` to ${shopName}` : ""}.</strong><br>You can close this window.</p>${closer}`);
   } catch (e) {
+    console.error("[etsy-callback] connect failed:", e?.message || e);
     return page(`<p>Couldn’t connect to Etsy: ${String(e.message).replace(/[<>&]/g, "")}</p>${closer}`);
   }
 }

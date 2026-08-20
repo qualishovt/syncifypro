@@ -28,15 +28,14 @@ export async function loader({ request }) {
   const { getEtsyConnection } = await import("../db/etsyConnection.server.js");
   const { listMigrationConnections, serializeMigrationConnection } = await import("../db/migrationConnection.server.js");
   const conn = await getEtsyConnection(session.shop);
-  const callbackUrl = `${new URL(request.url).origin}/migrations/etsy/callback`;
+  const { etsyConfigured } = await import("../migrations/etsy.server.js");
   // Saved key/secret connections — client-safe shape (non-secret fields to
   // prefill + a "set" marker per secret; the secrets themselves stay server-side).
   const saved = (await listMigrationConnections(session.shop)).map(serializeMigrationConnection);
   // Only metadata reaches the client — never any entered credentials/tokens.
   return {
     platforms: PLATFORMS,
-    etsy: { connected: Boolean(conn), shopName: conn?.etsyShopName ?? null },
-    callbackUrl,
+    etsy: { connected: Boolean(conn), shopName: conn?.etsyShopName ?? null, configured: etsyConfigured() },
     saved: Object.fromEntries(saved.map((s) => [s.platform, s])),
   };
 }
@@ -56,13 +55,14 @@ export async function action({ request }) {
 
   // ── Etsy OAuth: start the handshake / disconnect ────────────────────────────
   if (intent === "etsyConnect") {
-    const keystring = String(creds.keystring || "").trim();
-    if (!keystring) return data({ error: "Enter your Etsy app keystring first." }, { status: 400 });
-    const { pkcePair, randomState, buildAuthorizeUrl } = await import("../migrations/etsy.server.js");
+    // The app-level Etsy keystring is ours (server secret), never merchant input.
+    const { pkcePair, randomState, buildAuthorizeUrl, etsyKeystring, etsyRedirectUri } = await import("../migrations/etsy.server.js");
+    const keystring = etsyKeystring();
+    if (!keystring) return data({ error: "Etsy connection isn’t available on this installation yet." }, { status: 400 });
     const { saveOAuthState } = await import("../db/etsyConnection.server.js");
     const { verifier, challenge } = pkcePair();
     const state = randomState();
-    const redirectUri = `${new URL(request.url).origin}/migrations/etsy/callback`;
+    const redirectUri = etsyRedirectUri(new URL(request.url).origin);
     await saveOAuthState({ state, shop, keystring, codeVerifier: verifier, redirectUri });
     return { authorizeUrl: buildAuthorizeUrl({ keystring, redirectUri, state, challenge }) };
   }
@@ -186,7 +186,7 @@ function labelFor(platform, creds) {
 }
 
 export default function MigrationsPage() {
-  const { platforms, etsy, callbackUrl, saved } = useLoaderData();
+  const { platforms, etsy, saved } = useLoaderData();
   const connectFetcher = useFetcher();
   const migrateFetcher = useFetcher();
   const etsyFetcher = useFetcher();   // OAuth connect/disconnect
@@ -313,7 +313,7 @@ export default function MigrationsPage() {
       entities: [...selected].join(","), filters: JSON.stringify(filtersPayload()),
     }, { method: "post" });
   const connectEtsy = () =>
-    etsyFetcher.submit({ intent: "etsyConnect", platform: "etsy", creds: JSON.stringify({ keystring: creds.keystring || "" }) }, { method: "post" });
+    etsyFetcher.submit({ intent: "etsyConnect", platform: "etsy", creds: "{}" }, { method: "post" });
   const disconnectEtsy = () =>
     etsyFetcher.submit({ intent: "etsyDisconnect", platform: "etsy" }, { method: "post" });
 
@@ -429,18 +429,12 @@ export default function MigrationsPage() {
                 </s-stack>
               ) : (
                 <>
-                  <div style={{ display: "flex", flexDirection: "column", gap: ".8rem", maxWidth: 620 }}>
-                    <label style={field}>
-                      <s-text type="strong">Etsy app keystring (API key)</s-text>
-                      <input style={input} value={creds.keystring ?? ""} placeholder="abcdefghijklmnopqrstuvwx"
-                        disabled={busy} onChange={(e) => setField("keystring", e.target.value)} />
-                    </label>
-                    <s-text color="subdued">Add this redirect URI to your Etsy app:</s-text>
-                    <code style={codeBox}>{callbackUrl}</code>
-                  </div>
+                  {!etsy.configured && (
+                    <s-banner tone="warning">Etsy connection isn’t available on this installation yet.</s-banner>
+                  )}
                   <div style={helpRow}>
                     <div style={helpText}><s-text color="subdued">{platform.help}</s-text></div>
-                    <s-button variant="secondary" onClick={connectEtsy} disabled={busy || !(creds.keystring || "").trim()} loading={etsyBusy ? true : undefined}>
+                    <s-button variant="secondary" onClick={connectEtsy} disabled={busy || !etsy.configured} loading={etsyBusy ? true : undefined}>
                       Connect with Etsy
                     </s-button>
                   </div>
@@ -674,8 +668,3 @@ const helpText = { flex: "1 1 auto", minWidth: 0 };
 // Numbered "where to get these keys" steps under the fields.
 const guideList = { margin: 0, paddingLeft: "1.25rem", display: "flex", flexDirection: "column", gap: ".3rem", maxWidth: 720 };
 const guideItem = { fontSize: ".8125rem", color: "#616a75", lineHeight: 1.45 };
-const codeBox = {
-  fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace", fontSize: ".82rem",
-  padding: ".4rem .6rem", borderRadius: 8, border: "1px solid #e1e3e5", background: "#f6f6f7",
-  color: "#303030", wordBreak: "break-all", maxWidth: 620,
-};

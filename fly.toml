@@ -1,0 +1,40 @@
+# Fly.io deployment for SyncifyPro.
+#
+# One always-on machine: exports/imports run in-process (pg-boss worker) and the
+# scheduler ticks in-process, so the app must never scale to zero and must not
+# run more than one instance (two schedulers would double-fire).
+#
+#   fly deploy            # build the Dockerfile remotely and roll it out
+#   fly secrets set K=V   # env vars (never commit them)
+#   fly logs              # tail the app
+
+app = "syncifypro"
+primary_region = "ams"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[deploy]
+  # Apply Prisma migrations before the new machine takes traffic.
+  release_command = "npx prisma migrate deploy"
+
+[env]
+  PORT = "3000"
+  NODE_ENV = "production"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 250
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"

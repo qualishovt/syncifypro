@@ -29,7 +29,7 @@ import {
   validatePresta, fetchPrestaProducts, fetchPrestaCustomers, fetchPrestaOrders,
   fetchPrestaCategories, fetchPrestaCoupons,
 } from "./prestashop.server.js";
-import { fetchEtsyProducts, fetchEtsyCollections, fetchEtsyOrders, refreshAccessToken } from "./etsy.server.js";
+import { fetchEtsyProducts, fetchEtsyCollections, fetchEtsyOrders, refreshAccessToken, etsyKeystring } from "./etsy.server.js";
 import { getEtsyConnection, saveEtsyConnection } from "../db/etsyConnection.server.js";
 
 const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -129,8 +129,11 @@ const CONNECTORS = {
  * as `creds` to runMigration.
  */
 export async function prepareEtsyConnection(shop) {
-  const conn = await getEtsyConnection(shop);
-  if (!conn) throw new Error("Connect your Etsy account first.");
+  const stored = await getEtsyConnection(shop);
+  if (!stored) throw new Error("Connect your Etsy account first.");
+  // The app-level keystring is ours; prefer the current server value over the
+  // one stored at connect time so a rotated key keeps old connections working.
+  const conn = { ...stored, keystring: etsyKeystring() || stored.keystring };
   if (new Date(conn.expiresAt).getTime() - Date.now() > 60_000) return conn;
 
   const t = await refreshAccessToken({ keystring: conn.keystring, refreshToken: conn.refreshToken });

@@ -77,12 +77,13 @@ export const PLATFORMS = [
   {
     id: "etsy",
     label: "Etsy",
+    // Approved by Etsy 2026-08-20 (Personal Access tier: the app owner’s own
+    // account can authorize; request the commercial upgrade before App Store
+    // launch so any merchant can connect).
     implemented: true,
     oauth: true,
-    help: "Create an app at developers.etsy.com, add the callback URL below as a redirect URI, then paste its keystring (API key) and connect.",
-    fields: [
-      { key: "keystring", label: "Etsy app keystring (API key)", placeholder: "abcdefghijklmnopqrstuvwx" },
-    ],
+    help: "Click Connect with Etsy and sign in with the Etsy account that owns your shop; SyncifyPro only asks for read access to listings, shop sections and orders.",
+    fields: [],
     entities: ["products", "collections", "orders"],
   },
 ];

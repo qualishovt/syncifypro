@@ -1,10 +1,13 @@
-# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+# PRODUCTION app config (Fly.io, https://app.syncifypro.app). Deploy with:
+#   npx shopify app deploy --config production
+# Dev keeps using shopify.app.toml (separate Partners app), so `shopify app dev`
+# never overwrites these URLs.
 
-client_id = "eb67b39ada94a4cae1ed894e02c6b6a1"
-application_url = "https://example.com"
+client_id = "30e7a0bb86f2c0ee2931e2a196467506"
+application_url = "https://app.syncifypro.app"
 embedded = true
-name = "SyncifyPro (dev)"
-handle = "syncifypro-dev"
+name = "SyncifyPro"
+handle = "syncifypro"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
@@ -67,7 +70,7 @@ api_version = "2026-07"
   compliance_topics = [ "customers/data_request", "customers/redact", "shop/redact" ]
 
 [auth]
-redirect_urls = [ "https://example.com/api/auth" ]
+redirect_urls = [ "https://app.syncifypro.app/api/auth", "https://app.syncifypro.app/auth/callback", "https://app.syncifypro.app/auth/shopify/callback" ]
 
 [build]
-automatically_update_urls_on_dev = true
+automatically_update_urls_on_dev = false

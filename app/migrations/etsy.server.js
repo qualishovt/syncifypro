@@ -30,6 +30,40 @@ export function randomState() {
   return b64url(randomBytes(16));
 }
 
+/**
+ * SyncifyPro owns ONE Etsy app (registered by us at etsy.com/developers);
+ * merchants never see or enter its keystring — they just authorize. The
+ * keystring is a server secret; unset means Etsy is "not available yet".
+ */
+export function etsyKeystring() {
+  return String(process.env.ETSY_KEYSTRING || "").trim();
+}
+export function etsyConfigured() {
+  return Boolean(etsyKeystring());
+}
+
+/**
+ * Etsy now requires BOTH halves on OpenAPI requests:
+ *   x-api-key: <keystring>:<shared secret>
+ * (github.com/etsy/open-api discussion #1521). The secret is a server env var
+ * like the keystring; without it every data call 403s.
+ */
+export function apiKeyHeader(keystring) {
+  const secret = String(process.env.ETSY_SHARED_SECRET || "").trim();
+  return secret ? `${keystring}:${secret}` : keystring;
+}
+
+/**
+ * The OAuth redirect URI. Built from SHOPIFY_APP_URL (the canonical https
+ * origin) — NOT the incoming request, whose origin is plain http behind the
+ * hosting proxy and would fail Etsy’s exact-match check against the
+ * registered callback.
+ */
+export function etsyRedirectUri(fallbackOrigin) {
+  const base = String(process.env.SHOPIFY_APP_URL || fallbackOrigin || "").replace(/\/+$/, "");
+  return `${base}/migrations/etsy/callback`;
+}
+
 export function buildAuthorizeUrl({ keystring, redirectUri, state, challenge }) {
   const p = new URLSearchParams({
     response_type: "code",
@@ -46,7 +80,7 @@ export function buildAuthorizeUrl({ keystring, redirectUri, state, challenge }) 
 async function tokenRequest(body) {
   const res = await fetch(TOKEN_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    headers: { "Content-Type": "application/x-www-form-urlencoded", "x-api-key": apiKeyHeader(etsyKeystring()) },
     body: new URLSearchParams(body).toString(),
   });
   const json = await res.json().catch(() => ({}));
@@ -84,7 +118,7 @@ export async function fetchShop(conn) {
 
 async function etsyGet(conn, path) {
   const res = await fetch(`${API}${path}`, {
-    headers: { "x-api-key": conn.keystring, Authorization: `Bearer ${conn.accessToken}` },
+    headers: { "x-api-key": apiKeyHeader(conn.keystring), Authorization: `Bearer ${conn.accessToken}` },
   });
   if (!res.ok) throw new Error(`Etsy ${path} returned HTTP ${res.status}`);
   return res.json();
@@ -124,7 +158,15 @@ async function sectionTitleMap(conn) {
 
 export async function fetchEtsyProducts(conn, onProgress) {
   const sections = await sectionTitleMap(conn);
-  const listings = await fetchAll(conn, `/shops/${conn.etsyShopId}/listings?state=active&includes=Images,Inventory`, onProgress);
+  // A migration carries the whole catalog, not just what is currently live —
+  // drafts/inactive/expired become DRAFT products in Shopify. Etsy takes one
+  // state per request, so pull each in turn.
+  const listings = [];
+  for (const state of ["active", "inactive", "draft", "expired", "sold_out"]) {
+    try {
+      listings.push(...await fetchAll(conn, `/shops/${conn.etsyShopId}/listings?state=${state}&includes=Images,Inventory`, onProgress));
+    } catch { /* some states 404 on shops without them */ }
+  }
   const rows = [];
   let rn = 1;
 
