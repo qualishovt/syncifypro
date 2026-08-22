@@ -423,7 +423,6 @@ const RESPONSIVE_CSS = `
   }
   .mk-hero-text { max-width: 100% !important; margin: 0 auto; }
   .mk-hero-sub { max-width: 100% !important; margin-left: auto !important; margin-right: auto !important; }
-  .mk-mock { margin-right: 0 !important; border-radius: 14px !important; }
   .mk-datawrap { grid-template-columns: 1fr !important; gap: 1.75rem !important; }
   .mk-feature { flex-direction: column !important; gap: 1.75rem !important; padding: 2.25rem 0 !important; }
   .mk-feature-text { text-align: center !important; }
@@ -435,7 +434,8 @@ const RESPONSIVE_CSS = `
   .mk-install-top { margin-right: 1.25rem !important; padding: .55rem 1.2rem !important; }
   /* the fixed 168px sidebar leaves no room for the sheet rows on phones */
   .mk-mock-side { display: none !important; }
-  .mk-sheetrow { flex-wrap: wrap !important; }
+  /* name on its own line, pills underneath */
+  .mk-sheetrow { flex-direction: column !important; align-items: flex-start !important; gap: .4rem !important; }
   .mk-sheettags { justify-content: flex-start !important; }
 }
 `;
@@ -589,9 +589,8 @@ const mk = {
 
 const mock = {
   window: {
-    display: "flex", background: "#fff", border: `1px solid ${LINE}`, borderRadius: "14px 0 0 14px",
+    display: "flex", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14,
     boxShadow: "0 18px 40px rgba(22,48,42,.12)", overflow: "hidden", minHeight: 380,
-    marginRight: "-8vw",
   },
   side: { width: 168, background: "#fbfcfb", borderRight: `1px solid ${LINE}`, padding: ".9rem .6rem", flex: "none" },
   sideItem: { display: "block", fontSize: 13.5, color: "#7d9489", padding: ".42rem .6rem", borderRadius: 6 },
