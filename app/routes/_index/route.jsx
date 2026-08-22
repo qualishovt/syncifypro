@@ -10,6 +10,7 @@
  * `?shop=` on either host still deep-links straight into the embedded admin app.
  */
 
+import { useEffect, useState } from "react";
 import { redirect, Form, useLoaderData } from "react-router";
 import { login } from "../../shopify.server";
 import PlatformLogo from "../../components/PlatformLogos.jsx";
@@ -160,7 +161,8 @@ const FORMATS = ["Excel (.xlsx)", "CSV", "Google Sheets", "FTP / SFTP", "Amazon 
 function MarketingPage({ showForm }) {
   return (
     <div style={mk.root}>
-      <style dangerouslySetInnerHTML={{ __html: RESPONSIVE_CSS }} />
+      <style dangerouslySetInnerHTML={{ __html: THEME_CSS + RESPONSIVE_CSS }} />
+      <script dangerouslySetInnerHTML={{ __html: THEME_BOOT }} />
       <header style={mk.header} className="mk-header">
         <a href="/" style={mk.brandLink} className="mk-brand">
           <img src="/brand/syncifypro-icon-rounded.svg" alt="" width="34" height="34" style={mk.logoImg} />
@@ -171,6 +173,7 @@ function MarketingPage({ showForm }) {
             <a key={href} href={href} style={mk.navLink}>{label}</a>
           ))}
         </nav>
+        <ThemeToggle />
         <a href="#install" style={mk.installBtn} className="mk-install-top">Install</a>
       </header>
 
@@ -350,17 +353,41 @@ function AppMock() {
   );
 }
 
+/** Device / Light / Dark switch; the choice lives in localStorage and THEME_BOOT applies it. */
+const THEME_KEY = "sp-theme";
+const THEME_OPTIONS = [
+  ["device", "Use device theme", <svg key="d" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /></svg>],
+  ["light", "Light theme", <svg key="l" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></svg>],
+  ["dark", "Dark theme", <svg key="k" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" /></svg>],
+];
+function ThemeToggle() {
+  const [pref, setPref] = useState("device");
+  useEffect(() => { setPref(window.localStorage.getItem(THEME_KEY) || "device"); }, []);
+  const choose = (p) => {
+    setPref(p);
+    window.localStorage.setItem(THEME_KEY, p);
+    window.__applyTheme?.();
+  };
+  return (
+    <div className="mk-theme" role="group" aria-label="Colour theme">
+      {THEME_OPTIONS.map(([id, label, icon]) => (
+        <button key={id} type="button" title={label} aria-label={label} aria-pressed={pref === id} onClick={() => choose(id)}>{icon}</button>
+      ))}
+    </div>
+  );
+}
+
 /** Light abstract art for the alternating feature rows. */
 function FeatureArt({ kind }) {
   const G = "#45795a";
-  const L = "#cfe3d7";
+  const L = "var(--mk-art-line)";
   if (kind === "sheet") {
     return (
       <svg viewBox="0 0 320 200" width="100%" role="img" aria-label="">
-        <rect x="18" y="20" width="200" height="150" rx="12" fill="#fff" stroke={L} strokeWidth="2" />
+        <rect x="18" y="20" width="200" height="150" rx="12" fill="var(--mk-card)" stroke={L} strokeWidth="2" />
         <rect x="18" y="20" width="200" height="26" rx="12" fill={G} opacity=".18" />
         {[70, 96, 122, 148].map((y) => (<rect key={y} x="34" y={y} width="168" height="8" rx="4" fill={L} />))}
-        <rect x="120" y="60" width="182" height="120" rx="12" fill="#fff" stroke={G} strokeWidth="2" />
+        <rect x="120" y="60" width="182" height="120" rx="12" fill="var(--mk-card)" stroke={G} strokeWidth="2" />
         <rect x="120" y="60" width="182" height="24" rx="12" fill={G} />
         {[104, 128, 152].map((y) => (<rect key={y} x="136" y={y} width="150" height="8" rx="4" fill={L} />))}
       </svg>
@@ -371,9 +398,9 @@ function FeatureArt({ kind }) {
       <svg viewBox="0 0 320 200" width="100%" role="img" aria-label="">
         {[30, 76, 122].map((y, i) => (
           <g key={y}>
-            <rect x="24" y={y} width="150" height="34" rx="10" fill="#fff" stroke={L} strokeWidth="2" />
+            <rect x="24" y={y} width="150" height="34" rx="10" fill="var(--mk-card)" stroke={L} strokeWidth="2" />
             <rect x="40" y={y + 13} width={90 - i * 18} height="8" rx="4" fill={L} />
-            <rect x="196" y={y} width="100" height="34" rx="10" fill={i === 1 ? G : "#fff"} stroke={i === 1 ? G : L} strokeWidth="2" />
+            <rect x="196" y={y} width="100" height="34" rx="10" fill={i === 1 ? G : "var(--mk-card)"} stroke={i === 1 ? G : L} strokeWidth="2" />
             <rect x="212" y={y + 13} width="64" height="8" rx="4" fill={i === 1 ? "#fff" : L} />
           </g>
         ))}
@@ -384,21 +411,21 @@ function FeatureArt({ kind }) {
   if (kind === "clock") {
     return (
       <svg viewBox="0 0 320 200" width="100%" role="img" aria-label="">
-        <rect x="26" y="30" width="150" height="140" rx="14" fill="#fff" stroke={L} strokeWidth="2" />
+        <rect x="26" y="30" width="150" height="140" rx="14" fill="var(--mk-card)" stroke={L} strokeWidth="2" />
         <rect x="26" y="30" width="150" height="30" rx="14" fill={G} opacity=".18" />
         {[0, 1, 2, 3].map((r) => [0, 1, 2, 3].map((c) => (
           <rect key={`${r}-${c}`} x={44 + c * 32} y={76 + r * 22} width="18" height="12" rx="4" fill={r === 1 && c === 2 ? G : L} />
         )))}
-        <circle cx="238" cy="100" r="52" fill="#fff" stroke={G} strokeWidth="3" />
+        <circle cx="238" cy="100" r="52" fill="var(--mk-card)" stroke={G} strokeWidth="3" />
         <path d="M238 68v32l22 14" stroke={G} strokeWidth="4" strokeLinecap="round" fill="none" />
       </svg>
     );
   }
   return (
     <svg viewBox="0 0 320 200" width="100%" role="img" aria-label="">
-      <circle cx="70" cy="60" r="24" fill="#fff" stroke={L} strokeWidth="2" />
-      <circle cx="62" cy="132" r="24" fill="#fff" stroke={L} strokeWidth="2" />
-      <circle cx="140" cy="96" r="24" fill="#fff" stroke={L} strokeWidth="2" />
+      <circle cx="70" cy="60" r="24" fill="var(--mk-card)" stroke={L} strokeWidth="2" />
+      <circle cx="62" cy="132" r="24" fill="var(--mk-card)" stroke={L} strokeWidth="2" />
+      <circle cx="140" cy="96" r="24" fill="var(--mk-card)" stroke={L} strokeWidth="2" />
       <rect x="212" y="52" width="88" height="88" rx="22" fill={G} />
       <path d="M242 116V80m0 0-12 12m12-12 12 12" stroke="#fff" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
       <path d="M270 76v36m0 0 12-12m-12 12-12-12" stroke="#fff" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
@@ -413,6 +440,31 @@ function FeatureArt({ kind }) {
 /* The marketing page is built from inline style objects, which can't hold media
    queries. This stylesheet layers the mobile overrides on top via class hooks;
    `!important` is required to win over the inline (desktop) styles. */
+/* Light palette on :root; dark overrides when the bootstrap script sets data-theme="dark". */
+const THEME_CSS = `
+:root {
+  --mk-bg: #fff; --mk-card: #fff; --mk-surface: #fbfcfb; --mk-shade: #f5f8f6; --mk-chip: #f1f5f2;
+  --mk-line: #e3ebe6; --mk-track: #eaf0ec; --mk-active: #e9f2ec; --mk-art-line: #cfe3d7;
+  --mk-ink: #16302a; --mk-body: #5c6b63; --mk-muted: #8fa79b;
+  --mk-green: #45795a; --mk-green-dark: #38634a; --mk-green-soft: #d7ecdf; --mk-green-ink: #1e5136;
+  --mk-blue-soft: #dbeaf5; --mk-blue-ink: #1f4d70;
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --mk-bg: #0f1a15; --mk-card: #162420; --mk-surface: #13201b; --mk-shade: #132019; --mk-chip: #1d2d26;
+  --mk-line: #25382f; --mk-track: #25382f; --mk-active: #1f3429; --mk-art-line: #2f4d3d;
+  --mk-ink: #e8f0ec; --mk-body: #a9bbb1; --mk-muted: #7f948a;
+  --mk-green: #5ea67b; --mk-green-dark: #4d8f66; --mk-green-soft: #1f3b2c; --mk-green-ink: #bfe5cd;
+  --mk-blue-soft: #1c2f3e; --mk-blue-ink: #a8cdea;
+  color-scheme: dark;
+}
+.mk-theme { display: inline-flex; border: 1px solid var(--mk-line); border-radius: 999px; padding: 2px; gap: 2px; background: var(--mk-chip); flex: none; }
+.mk-theme button { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 26px; border: 0; border-radius: 999px; background: transparent; color: var(--mk-muted); cursor: pointer; padding: 0; }
+.mk-theme button[aria-pressed="true"] { background: var(--mk-bg); color: var(--mk-ink); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+.mk-theme svg { width: 15px; height: 15px; }
+`;
+const THEME_BOOT = `(function(){var k="sp-theme",m=matchMedia("(prefers-color-scheme: dark)");function a(){var p=localStorage.getItem(k)||"device";var d=p==="dark"||(p==="device"&&m.matches);document.documentElement.setAttribute("data-theme",d?"dark":"light");}window.__applyTheme=a;a();m.addEventListener("change",a);})();`;
+
 const RESPONSIVE_CSS = `
 @media (max-width: 900px) {
   .mk-hero {
@@ -433,6 +485,8 @@ const RESPONSIVE_CSS = `
   .mk-nav { display: none !important; }
   .mk-install-top { margin-right: 1.25rem !important; padding: .55rem 1.2rem !important; }
   .mk-install-hero { display: none !important; }   /* header button is enough on phones */
+  .mk-theme { margin-left: auto; }
+  .mk-install-top { margin-left: .6rem !important; }
   /* the fixed 168px sidebar leaves no room for the sheet rows on phones */
   .mk-mock-side { display: none !important; }
   /* name on its own line, pills underneath */
@@ -442,12 +496,12 @@ const RESPONSIVE_CSS = `
 `;
 
 const SANS = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
-const GREEN = "#45795a";
-const GREEN_DARK = "#38634a";
-const INK = "#16302a";
-const BODY = "#5c6b63";
-const LINE = "#e3ebe6";
-const SHADE = "#f5f8f6";
+const GREEN = "var(--mk-green)";
+const GREEN_DARK = "var(--mk-green-dark)";
+const INK = "var(--mk-ink)";
+const BODY = "var(--mk-body)";
+const LINE = "var(--mk-line)";
+const SHADE = "var(--mk-shade)";
 
 const inst = {
   page: {
@@ -476,11 +530,11 @@ const inst = {
 };
 
 const mk = {
-  root: { background: "#fff", color: BODY, fontFamily: SANS, lineHeight: 1.65, overflowX: "hidden" },
+  root: { background: "var(--mk-bg)", color: BODY, fontFamily: SANS, lineHeight: 1.65, overflowX: "hidden" },
 
   header: {
     display: "flex", alignItems: "center", gap: "1.5rem", borderBottom: `1px solid ${LINE}`,
-    position: "sticky", top: 0, background: "#fff", zIndex: 10,
+    position: "sticky", top: 0, background: "var(--mk-bg)", zIndex: 10,
   },
   brandLink: {
     display: "inline-flex", alignItems: "center", gap: 10, flex: "none",
@@ -505,7 +559,7 @@ const mk = {
     gap: "2rem", background: SHADE, padding: "3.5rem 0 3.5rem 6vw", overflow: "hidden",
   },
   heroText: { maxWidth: 520 },
-  heroKicker: { margin: 0, fontSize: 15, fontWeight: 700, color: "#9db3a7", letterSpacing: ".02em" },
+  heroKicker: { margin: 0, fontSize: 15, fontWeight: 700, color: "var(--mk-muted)", letterSpacing: ".02em" },
   h1: {
     fontSize: "clamp(1.9rem, 3.4vw, 2.6rem)", lineHeight: 1.22, color: INK, fontWeight: 700,
     letterSpacing: "-.02em", margin: ".6rem 0 0",
@@ -517,7 +571,7 @@ const mk = {
     display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "1rem 2.4rem",
     padding: "1.8rem 1.25rem", borderBottom: `1px solid ${LINE}`,
   },
-  stripItem: { fontSize: 14.5, fontWeight: 600, color: "#8fa79b" },
+  stripItem: { fontSize: 14.5, fontWeight: 600, color: "var(--mk-muted)" },
 
   shaded: { background: SHADE, padding: "4rem 1.25rem" },
   section: { padding: "4rem 1.25rem" },
@@ -538,7 +592,7 @@ const mk = {
     width: 34, height: 34, borderRadius: "50%", background: GREEN,
   },
   dataLabel: { fontSize: 15.5, color: INK, fontWeight: 600 },
-  dataFoot: { maxWidth: 1080, margin: "2.5rem auto 0", textAlign: "center", fontSize: 14.5, color: "#8fa79b" },
+  dataFoot: { maxWidth: 1080, margin: "2.5rem auto 0", textAlign: "center", fontSize: 14.5, color: "var(--mk-muted)" },
 
   features: { maxWidth: 1080, margin: "0 auto", padding: "1rem 1.25rem" },
   featureRow: {
@@ -551,7 +605,7 @@ const mk = {
   sourceRow: { display: "flex", flexWrap: "wrap", gap: ".8rem", justifyContent: "center", marginTop: "2rem" },
   source: {
     display: "inline-flex", alignItems: "center", gap: 10, padding: ".7rem 1.2rem", borderRadius: 10,
-    background: "#fff", border: `1px solid ${LINE}`,
+    background: "var(--mk-bg)", border: `1px solid ${LINE}`,
   },
   sourceName: { fontSize: 15, color: INK, fontWeight: 600 },
 
@@ -559,7 +613,7 @@ const mk = {
     maxWidth: 1080, margin: "2.5rem auto 0", display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: "1.2rem",
   },
-  secCard: { background: "#fff", border: `1px solid ${LINE}`, borderRadius: 12, padding: "1.3rem 1.4rem" },
+  secCard: { background: "var(--mk-bg)", border: `1px solid ${LINE}`, borderRadius: 12, padding: "1.3rem 1.4rem" },
   secTitle: { fontSize: 16.5, color: INK, fontWeight: 700, margin: "0 0 .45rem" },
   secBody: { margin: 0, fontSize: 14.8 },
   secFoot: { textAlign: "center", marginTop: "1.8rem", fontSize: 15 },
@@ -569,7 +623,7 @@ const mk = {
   ctaForm: { display: "flex", gap: ".7rem", justifyContent: "center", flexWrap: "wrap" },
   ctaInput: {
     flex: "0 1 320px", padding: ".75rem 1rem", fontSize: 15, borderRadius: 6,
-    border: `1px solid #b9c8c0`, background: "#fff", color: INK,
+    border: `1px solid var(--mk-line)`, background: "var(--mk-bg)", color: INK,
   },
 
   footer: { borderTop: `1px solid ${LINE}`, padding: "2.5rem 1.25rem 1.5rem" },
@@ -582,7 +636,7 @@ const mk = {
   footerBar: {
     maxWidth: 1080, margin: "2rem auto 0", paddingTop: "1.2rem", borderTop: `1px solid ${LINE}`,
     display: "flex", justifyContent: "space-between", alignItems: "center", gap: "1rem",
-    flexWrap: "wrap", fontSize: 14, color: "#8fa79b",
+    flexWrap: "wrap", fontSize: 14, color: "var(--mk-muted)",
   },
   footerBrand: { display: "inline-flex", alignItems: "center", gap: 8, color: INK, fontWeight: 700 },
   footerIcon: { display: "block", borderRadius: 6 },
@@ -590,18 +644,18 @@ const mk = {
 
 const mock = {
   window: {
-    display: "flex", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14,
+    display: "flex", background: "var(--mk-bg)", border: `1px solid ${LINE}`, borderRadius: 14,
     boxShadow: "0 18px 40px rgba(22,48,42,.12)", overflow: "hidden", minHeight: 380,
   },
-  side: { width: 168, background: "#fbfcfb", borderRight: `1px solid ${LINE}`, padding: ".9rem .6rem", flex: "none" },
-  sideItem: { display: "block", fontSize: 13.5, color: "#7d9489", padding: ".42rem .6rem", borderRadius: 6 },
-  sideItemActive: { background: "#e9f2ec", color: INK, fontWeight: 700 },
+  side: { width: 168, background: "var(--mk-surface)", borderRight: `1px solid ${LINE}`, padding: ".9rem .6rem", flex: "none" },
+  sideItem: { display: "block", fontSize: 13.5, color: "var(--mk-muted)", padding: ".42rem .6rem", borderRadius: 6 },
+  sideItemActive: { background: "var(--mk-active)", color: INK, fontWeight: 700 },
   main: { flex: 1, padding: "1.1rem 1.3rem", minWidth: 0 },
-  crumb: { fontSize: 13, color: "#8fa79b", marginBottom: ".7rem" },
+  crumb: { fontSize: 13, color: "var(--mk-muted)", marginBottom: ".7rem" },
   badges: { display: "flex", gap: ".45rem", flexWrap: "wrap", marginBottom: "1rem" },
-  badge: { fontSize: 12, color: "#5c6b63", background: "#f1f5f2", borderRadius: 999, padding: ".2rem .6rem" },
-  badgeGreen: { fontSize: 12, color: "#1e5136", background: "#d7ecdf", borderRadius: 999, padding: ".2rem .6rem", fontWeight: 600 },
-  progressTrack: { height: 8, borderRadius: 999, background: "#eaf0ec", overflow: "hidden" },
+  badge: { fontSize: 12, color: "var(--mk-body)", background: "var(--mk-chip)", borderRadius: 999, padding: ".2rem .6rem" },
+  badgeGreen: { fontSize: 12, color: "var(--mk-green-ink)", background: "var(--mk-green-soft)", borderRadius: 999, padding: ".2rem .6rem", fontWeight: 600 },
+  progressTrack: { height: 8, borderRadius: 999, background: "var(--mk-track)", overflow: "hidden" },
   progressFill: { width: "72%", height: "100%", background: GREEN, borderRadius: 999 },
   sheetsLabel: { fontSize: 13, fontWeight: 700, color: INK, margin: "1.1rem 0 .5rem" },
   sheetRow: {
@@ -610,7 +664,7 @@ const mock = {
   },
   sheetName: { fontSize: 13.5, color: INK, fontWeight: 600, whiteSpace: "nowrap" },
   sheetTags: { display: "inline-flex", gap: ".35rem", flexWrap: "wrap", justifyContent: "flex-end" },
-  tagNew: { fontSize: 11.5, color: "#1e5136", background: "#d7ecdf", borderRadius: 999, padding: ".12rem .5rem" },
-  tagUpd: { fontSize: 11.5, color: "#1f4d70", background: "#dbeaf5", borderRadius: 999, padding: ".12rem .5rem" },
-  tagTotal: { fontSize: 11.5, color: "#5c6b63", background: "#f1f5f2", borderRadius: 999, padding: ".12rem .5rem" },
+  tagNew: { fontSize: 11.5, color: "var(--mk-green-ink)", background: "var(--mk-green-soft)", borderRadius: 999, padding: ".12rem .5rem" },
+  tagUpd: { fontSize: 11.5, color: "var(--mk-blue-ink)", background: "var(--mk-blue-soft)", borderRadius: 999, padding: ".12rem .5rem" },
+  tagTotal: { fontSize: 11.5, color: "var(--mk-body)", background: "var(--mk-chip)", borderRadius: 999, padding: ".12rem .5rem" },
 };
