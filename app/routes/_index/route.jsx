@@ -184,7 +184,7 @@ function MarketingPage({ showForm }) {
               Manage your Shopify store data by bulk exporting and importing human-readable Excel and
               CSV files — and migrate a whole store from another platform.
             </p>
-            <a href="#install" style={mk.installBtnLg}>Install</a>
+            <a href="#install" style={mk.installBtnLg} className="mk-install-hero">Install</a>
           </div>
           <div style={mk.heroArt}>
             <AppMock />
@@ -432,6 +432,7 @@ const RESPONSIVE_CSS = `
   .mk-brand { padding-left: 1.25rem !important; }
   .mk-nav { display: none !important; }
   .mk-install-top { margin-right: 1.25rem !important; padding: .55rem 1.2rem !important; }
+  .mk-install-hero { display: none !important; }   /* header button is enough on phones */
   /* the fixed 168px sidebar leaves no room for the sheet rows on phones */
   .mk-mock-side { display: none !important; }
   /* name on its own line, pills underneath */
@@ -491,7 +492,7 @@ const mk = {
   navLink: { color: INK, textDecoration: "none", fontSize: 15.5, fontWeight: 600 },
   installBtn: {
     background: GREEN, color: "#fff", textDecoration: "none", fontWeight: 700, fontSize: 15,
-    padding: ".6rem 1.6rem", borderRadius: 6, marginRight: "2rem", whiteSpace: "nowrap",
+    padding: ".6rem 1.6rem", borderRadius: 6, marginLeft: "auto", marginRight: "2rem", whiteSpace: "nowrap",
   },
   installBtnLg: {
     display: "inline-block", background: GREEN, color: "#fff", textDecoration: "none", fontWeight: 700,
