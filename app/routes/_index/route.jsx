@@ -605,7 +605,7 @@ const mk = {
   sourceRow: { display: "flex", flexWrap: "wrap", gap: ".8rem", justifyContent: "center", marginTop: "2rem" },
   source: {
     display: "inline-flex", alignItems: "center", gap: 10, padding: ".7rem 1.2rem", borderRadius: 10,
-    background: "var(--mk-bg)", border: `1px solid ${LINE}`,
+    background: "var(--mk-card)", border: `1px solid ${LINE}`,
   },
   sourceName: { fontSize: 15, color: INK, fontWeight: 600 },
 
@@ -613,7 +613,7 @@ const mk = {
     maxWidth: 1080, margin: "2.5rem auto 0", display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: "1.2rem",
   },
-  secCard: { background: "var(--mk-bg)", border: `1px solid ${LINE}`, borderRadius: 12, padding: "1.3rem 1.4rem" },
+  secCard: { background: "var(--mk-card)", border: `1px solid ${LINE}`, borderRadius: 12, padding: "1.3rem 1.4rem" },
   secTitle: { fontSize: 16.5, color: INK, fontWeight: 700, margin: "0 0 .45rem" },
   secBody: { margin: 0, fontSize: 14.8 },
   secFoot: { textAlign: "center", marginTop: "1.8rem", fontSize: 15 },
@@ -623,7 +623,7 @@ const mk = {
   ctaForm: { display: "flex", gap: ".7rem", justifyContent: "center", flexWrap: "wrap" },
   ctaInput: {
     flex: "0 1 320px", padding: ".75rem 1rem", fontSize: 15, borderRadius: 6,
-    border: `1px solid var(--mk-line)`, background: "var(--mk-bg)", color: INK,
+    border: `1px solid var(--mk-line)`, background: "var(--mk-card)", color: INK,
   },
 
   footer: { borderTop: `1px solid ${LINE}`, padding: "2.5rem 1.25rem 1.5rem" },
@@ -644,7 +644,7 @@ const mk = {
 
 const mock = {
   window: {
-    display: "flex", background: "var(--mk-bg)", border: `1px solid ${LINE}`, borderRadius: 14,
+    display: "flex", background: "var(--mk-card)", border: `1px solid ${LINE}`, borderRadius: 14,
     boxShadow: "0 18px 40px rgba(22,48,42,.12)", overflow: "hidden", minHeight: 380,
   },
   side: { width: 168, background: "var(--mk-surface)", borderRight: `1px solid ${LINE}`, padding: ".9rem .6rem", flex: "none" },
