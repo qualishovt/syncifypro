@@ -321,7 +321,7 @@ function AppMock() {
   ];
   return (
     <div style={mock.window} className="mk-mock">
-      <div style={mock.side}>
+      <div style={mock.side} className="mk-mock-side">
         {["Home", "Export", "Import", "Schedules", "Migrations", "Activity"].map((s, i) => (
           <span key={s} style={{ ...mock.sideItem, ...(i === 2 ? mock.sideItemActive : null) }}>{s}</span>
         ))}
@@ -336,9 +336,9 @@ function AppMock() {
         <div style={mock.progressTrack}><div style={mock.progressFill} /></div>
         <p style={mock.sheetsLabel}>Sheets</p>
         {sheets.map(([name, a, b, total]) => (
-          <div key={name} style={mock.sheetRow}>
+          <div key={name} style={mock.sheetRow} className="mk-sheetrow">
             <span style={mock.sheetName}>{name}</span>
-            <span style={mock.sheetTags}>
+            <span style={mock.sheetTags} className="mk-sheettags">
               {a && <span style={mock.tagNew}>{a}</span>}
               {b && <span style={mock.tagUpd}>{b}</span>}
               <span style={mock.tagTotal}>{total}</span>
@@ -433,6 +433,10 @@ const RESPONSIVE_CSS = `
   .mk-brand { padding-left: 1.25rem !important; }
   .mk-nav { display: none !important; }
   .mk-install-top { margin-right: 1.25rem !important; padding: .55rem 1.2rem !important; }
+  /* the fixed 168px sidebar leaves no room for the sheet rows on phones */
+  .mk-mock-side { display: none !important; }
+  .mk-sheetrow { flex-wrap: wrap !important; }
+  .mk-sheettags { justify-content: flex-start !important; }
 }
 `;
 
