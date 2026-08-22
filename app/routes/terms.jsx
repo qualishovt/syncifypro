@@ -13,7 +13,7 @@ export const meta = () => [
 
 const APP = "SyncifyPro";
 const OPERATOR = "IntelliShop";
-const CONTACT = "tehran.alishov@gmail.com";
+const CONTACT = "support@syncifypro.app";
 const EFFECTIVE = "August 19, 2026";
 
 /* eslint-disable react/no-unescaped-entities */

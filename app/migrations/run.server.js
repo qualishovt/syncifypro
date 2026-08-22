@@ -29,6 +29,10 @@ import {
   validatePresta, fetchPrestaProducts, fetchPrestaCustomers, fetchPrestaOrders,
   fetchPrestaCategories, fetchPrestaCoupons,
 } from "./prestashop.server.js";
+import {
+  validateOpenCart, fetchOpenCartProducts, fetchOpenCartCustomers, fetchOpenCartOrders,
+  fetchOpenCartCategories, fetchOpenCartCoupons,
+} from "./opencart.server.js";
 import { fetchEtsyProducts, fetchEtsyCollections, fetchEtsyOrders, refreshAccessToken, etsyKeystring } from "./etsy.server.js";
 import { getEtsyConnection, saveEtsyConnection } from "../db/etsyConnection.server.js";
 
@@ -111,6 +115,13 @@ const CONNECTORS = {
     fetch: {
       products: fetchPrestaProducts, customers: fetchPrestaCustomers, orders: fetchPrestaOrders,
       collections: fetchPrestaCategories, discounts: fetchPrestaCoupons,
+    },
+  },
+  opencart: {
+    validate: validateOpenCart,
+    fetch: {
+      products: fetchOpenCartProducts, customers: fetchOpenCartCustomers, orders: fetchOpenCartOrders,
+      collections: fetchOpenCartCategories, discounts: fetchOpenCartCoupons,
     },
   },
   etsy: {

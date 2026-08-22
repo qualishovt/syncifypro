@@ -14,7 +14,7 @@ export const meta = () => [
 
 const APP = "SyncifyPro";
 const OPERATOR = "IntelliShop";
-const CONTACT = "tehran.alishov@gmail.com";
+const CONTACT = "support@syncifypro.app";
 const APP_URL = "https://app.syncifypro.app";
 const EFFECTIVE = "August 19, 2026";
 

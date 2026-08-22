@@ -498,7 +498,7 @@ function AboutCard({ appInfo }) {
       </s-stack>
       <s-divider />
       <s-stack direction="block" gap="small-200">
-        <s-link href="mailto:tehran.alishov@gmail.com">Contact support</s-link>
+        <s-link href="mailto:support@syncifypro.app">Contact support</s-link>
         <s-link href="https://www.shopify.com/legal/privacy" target="_blank">Privacy policy</s-link>
       </s-stack>
     </Card>

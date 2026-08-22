@@ -35,6 +35,7 @@ export async function loader({ request }) {
   // Only metadata reaches the client — never any entered credentials/tokens.
   return {
     platforms: PLATFORMS,
+    shopDomain: session.shop,
     etsy: { connected: Boolean(conn), shopName: conn?.etsyShopName ?? null, configured: etsyConfigured() },
     saved: Object.fromEntries(saved.map((s) => [s.platform, s])),
   };
@@ -186,7 +187,7 @@ function labelFor(platform, creds) {
 }
 
 export default function MigrationsPage() {
-  const { platforms, etsy, saved } = useLoaderData();
+  const { platforms, etsy, saved, shopDomain } = useLoaderData();
   const connectFetcher = useFetcher();
   const migrateFetcher = useFetcher();
   const etsyFetcher = useFetcher();   // OAuth connect/disconnect
@@ -253,6 +254,29 @@ export default function MigrationsPage() {
   function switchPlatform(id) {
     setPlatformId(id);
     if (connectFetcher.data) connectFetcher.load("/app/migrations");
+  }
+  // Bridge platforms (OpenCart): mint a token, put it in the form, and save the
+  // generated PHP file. Fetched (not window.open) so App Bridge authenticates
+  // the request inside the embedded frame.
+  const [bridgeBusy, setBridgeBusy] = useState(false);
+  async function downloadBridge() {
+    let token = (credsByPlatform[platformId]?.bridgeToken || "").trim();
+    if (!/^[A-Za-z0-9_-]{16,128}$/.test(token)) {
+      const bytes = new Uint8Array(24); crypto.getRandomValues(bytes);
+      token = "sp_" + Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+      setField("bridgeToken", token);
+    }
+    setBridgeBusy(true);
+    try {
+      const res = await fetch(`/app/migrations/opencart-bridge?token=${encodeURIComponent(token)}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url; a.download = "syncifypro-bridge.php"; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch (e) {
+      window.shopify?.toast?.show?.(`Couldn’t generate the bridge file (${e.message})`, { isError: true });
+    } finally { setBridgeBusy(false); }
   }
   const setField = (key, value) =>
     setCredsByPlatform((prev) => ({ ...prev, [platformId]: { ...(prev[platformId] ?? {}), [key]: value } }));
@@ -357,6 +381,8 @@ export default function MigrationsPage() {
               const sc = saved?.[p.id];
               const status = !p.implemented
                 ? "Coming soon"
+                : p.contact
+                  ? "Contact us"
                 : p.oauth
                   ? (etsy?.connected ? `Connected${etsy.shopName ? ` · ${etsy.shopName}` : ""}` : "Not connected")
                   : (sc || (connectFetcher.data?.connected && connectFetcher.data?.platform === p.id)
@@ -420,6 +446,14 @@ export default function MigrationsPage() {
 
             {!connOpen ? null : !platform.implemented ? (
               <s-banner tone="warning">{platform.label} migrations are coming soon.</s-banner>
+            ) : platform.contact ? (
+              /* ── Assisted platform (Etsy): no self-serve connection ── */
+              <div style={helpRow}>
+                <div style={helpText}><s-text color="subdued">{platform.help}</s-text></div>
+                <s-button variant="primary" href={contactHref(platform.label, shopDomain)} target="_blank">
+                  Contact us for {platform.label} migration
+                </s-button>
+              </div>
             ) : platform.oauth ? (
               /* ── OAuth platform (Etsy) ── */
               oauthConnected ? (
@@ -450,6 +484,18 @@ export default function MigrationsPage() {
                     <s-button variant="tertiary" tone="critical" onClick={disconnect} disabled={busy}>Disconnect</s-button>
                   </s-stack>
                 )}
+                {platform.bridge && (
+                  <>
+                    <ol style={guideList}>
+                      {platform.guide.map((step, i) => <li key={i} style={guideItem}>{step}</li>)}
+                    </ol>
+                    <div>
+                      <s-button variant="secondary" icon="download" onClick={downloadBridge} disabled={busy || bridgeBusy} loading={bridgeBusy ? true : undefined}>
+                        Download bridge file
+                      </s-button>
+                    </div>
+                  </>
+                )}
                 <div style={{ display: "flex", flexDirection: "column", gap: ".8rem", maxWidth: 620 }}>
                   {platform.fields.map((f) => (
                     <label key={f.key} style={field}>
@@ -464,7 +510,7 @@ export default function MigrationsPage() {
                 </div>
                 {/* Where to get these keys — numbered steps when the platform
                     needs more than a one-liner (BigCommerce's three API types). */}
-                {platform.guide?.length > 0 && (
+                {!platform.bridge && platform.guide?.length > 0 && (
                   <ol style={guideList}>
                     {platform.guide.map((step, i) => <li key={i} style={guideItem}>{step}</li>)}
                   </ol>
@@ -663,6 +709,22 @@ const field = { display: "flex", flexDirection: "column", gap: ".3rem" };
 const input = { padding: ".5rem .65rem", borderRadius: 8, border: "1px solid #c9cccf", fontSize: ".9rem", background: "#fff", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" };
 // Help text left, Connect pinned right — the text wraps inside its own
 // flexible box instead of pushing the button down to the next line.
+/** mailto link for assisted migrations — pre-filled so the request carries the shop + platform. */
+function contactHref(label, shop) {
+  const subject = encodeURIComponent(`${label} migration request${shop ? ` — ${shop}` : ""}`);
+  const body = encodeURIComponent(`Hi SyncifyPro team,
+
+I’d like to migrate my ${label} store to Shopify.
+
+Shopify store: ${shop || ""}
+${label} store URL: 
+What to migrate (products / customers / orders…): 
+
+Thanks`);
+  return `mailto:${SUPPORT_EMAIL}?subject=${subject}&body=${body}`;
+}
+const SUPPORT_EMAIL = "support@syncifypro.app";
+
 const helpRow = { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "1rem" };
 const helpText = { flex: "1 1 auto", minWidth: 0 };
 // Numbered "where to get these keys" steps under the fields.

@@ -75,14 +75,35 @@ export const PLATFORMS = [
     entities: ["products", "customers", "orders", "collections", "discounts"],
   },
   {
+    id: "opencart",
+    label: "OpenCart",
+    // OpenCart has no read API, so the merchant uploads our read-only bridge
+    // file (generated with a per-shop token) to the store root — see
+    // migrations/opencart.server.js. `bridge` switches the form to that flow.
+    implemented: true,
+    bridge: true,
+    help: "",
+    guide: [
+      "Click Download bridge file — it is a small read-only PHP file with your private token built in.",
+      "Upload syncifypro-bridge.php to your OpenCart root folder (the one with config.php) using FTP or your hosting file manager.",
+      "Enter your store URL and click Connect. Delete the file from your server after the migration.",
+    ],
+    fields: [
+      { key: "siteUrl",     label: "Store URL",    placeholder: "https://example.com" },
+      { key: "bridgeToken", label: "Bridge token", placeholder: "Filled in when you download the bridge file" },
+    ],
+    entities: ["products", "customers", "orders", "collections", "discounts"],
+  },
+  {
     id: "etsy",
     label: "Etsy",
-    // Approved by Etsy 2026-08-20 (Personal Access tier: the app owner’s own
-    // account can authorize; request the commercial upgrade before App Store
-    // launch so any merchant can connect).
+    // Etsy’s API Terms (Aug 2026) prohibit apps that "migrate Etsy Members
+    // from Etsy", so the OAuth connector (still in etsy.server.js) can’t be
+    // offered self-serve. Merchants ask us instead and we handle it case by
+    // case. `contact` renders a contact-us card in place of the connect UI.
     implemented: true,
-    oauth: true,
-    help: "Click Connect with Etsy and sign in with the Etsy account that owns your shop; SyncifyPro only asks for read access to listings, shop sections and orders.",
+    contact: true,
+    help: "Etsy migrations are handled by our team. Tell us about your shop and what you’d like to move, and we’ll get back to you within one business day.",
     fields: [],
     entities: ["products", "collections", "orders"],
   },
@@ -145,6 +166,14 @@ const PLATFORM_FILTER_OPTIONS = {
       "Disputed", "Manual Verification Required", "Incomplete",
     ],
     customer_role: null, // customer groups, not roles
+  },
+  opencart: {
+    product_status: ["enabled", "disabled"],
+    order_status: [
+      "Pending", "Processing", "Processed", "Shipped", "Complete", "Canceled", "Canceled Reversal", "Denied",
+      "Expired", "Failed", "Refunded", "Reversed", "Chargeback", "Voided",
+    ],
+    customer_role: null,
   },
   prestashop: {
     product_status: ["active", "inactive"],

@@ -1,0 +1,536 @@
+<?php
+/**
+ * SyncifyPro OpenCart bridge (read-only).
+ *
+ * Drop this file into the OpenCart root (same folder as config.php) and call it over HTTP:
+ *
+ *   /syncifypro-bridge.php?token=TOKEN&entity=ping
+ *   /syncifypro-bridge.php?token=TOKEN&entity=products&page=1&limit=50
+ *   /syncifypro-bridge.php?token=TOKEN&entity=products&action=count
+ *   entity = ping | products | categories | customers | orders | coupons
+ *   action = list (default) | count
+ *   page   = 1-based page number (default 1)
+ *   limit  = rows per page (default 50, max 250)
+ *   Optional filters: id=<single id>, updated_since=YYYY-MM-DD (orders/products date_modified), language_id, store_id
+ *
+ * Tested with OpenCart 4.1.x (4.0.2+ schema: product_discount.special, seo_url key/value, order.payment_method JSON).
+ * Uses only prepared statements; values are never interpolated into SQL.
+ */
+
+declare(strict_types=1);
+
+const SYNCIFYPRO_BRIDGE_TOKEN = '__SYNCIFYPRO_TOKEN__';
+const SYNCIFYPRO_BRIDGE_VERSION = '1.0.0';
+
+header('Content-Type: application/json; charset=utf-8');
+header('Cache-Control: no-store');
+
+function respond(int $status, array $payload): void {
+    http_response_code($status);
+    echo json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION);
+    exit;
+}
+
+// ---- auth ----
+$token = (string)($_GET['token'] ?? ($_SERVER['HTTP_X_SYNCIFYPRO_TOKEN'] ?? ''));
+if ($token === '' || !hash_equals(SYNCIFYPRO_BRIDGE_TOKEN, $token)) {
+    respond(401, ['error' => 'Invalid or missing token']);
+}
+
+// ---- load OpenCart config ----
+$configFile = __DIR__ . '/config.php';
+if (!is_file($configFile)) {
+    respond(500, ['error' => 'config.php not found next to bridge file']);
+}
+require_once $configFile;
+foreach (['DB_HOSTNAME', 'DB_USERNAME', 'DB_PASSWORD', 'DB_DATABASE', 'DB_PREFIX', 'HTTP_SERVER'] as $c) {
+    if (!defined($c)) respond(500, ['error' => "config.php missing $c"]);
+}
+$prefix = DB_PREFIX;
+$port = defined('DB_PORT') && DB_PORT ? (int)DB_PORT : 3306;
+
+mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
+try {
+    $db = new mysqli(DB_HOSTNAME, DB_USERNAME, DB_PASSWORD, DB_DATABASE, $port);
+    $db->set_charset('utf8mb4');
+} catch (Throwable $e) {
+    respond(500, ['error' => 'DB connection failed: ' . $e->getMessage()]);
+}
+
+// ---- helpers ----
+function rows(mysqli $db, string $sql, array $params = []): array {
+    $st = $db->prepare($sql);
+    if ($params) {
+        $types = '';
+        foreach ($params as $p) $types .= is_int($p) ? 'i' : (is_float($p) ? 'd' : 's');
+        $st->bind_param($types, ...$params);
+    }
+    $st->execute();
+    $res = $st->get_result();
+    $out = $res ? $res->fetch_all(MYSQLI_ASSOC) : [];
+    $st->close();
+    return $out;
+}
+function one(mysqli $db, string $sql, array $params = []): ?array {
+    $r = rows($db, $sql, $params);
+    return $r[0] ?? null;
+}
+function t(string $name): string { global $prefix; return '`' . $prefix . $name . '`'; }
+function setting(mysqli $db, string $key, $default = null) {
+    $r = one($db, 'SELECT `value` FROM ' . t('setting') . ' WHERE `store_id` = 0 AND `key` = ?', [$key]);
+    return $r ? $r['value'] : $default;
+}
+function decode_html(?string $s): string {
+    return html_entity_decode((string)$s, ENT_QUOTES, 'UTF-8');
+}
+function image_url(?string $path): ?string {
+    if (!$path) return null;
+    return rtrim(HTTP_SERVER, '/') . '/image/' . ltrim($path, '/');
+}
+function seo_keyword(mysqli $db, string $key, string $value, int $languageId, int $storeId): ?string {
+    $r = one($db, 'SELECT `keyword` FROM ' . t('seo_url') . ' WHERE `key` = ? AND `value` = ? AND `language_id` = ? AND `store_id` = ? LIMIT 1', [$key, $value, $languageId, $storeId]);
+    return $r['keyword'] ?? null;
+}
+function json_or_null(?string $s) {
+    if ($s === null || $s === '') return null;
+    $d = json_decode($s, true);
+    return is_array($d) ? $d : $s;
+}
+function ids_in(array $rows, string $col): array {
+    return array_values(array_unique(array_map(fn($r) => (int)$r[$col], $rows)));
+}
+function placeholders(array $ids): string { return implode(',', array_fill(0, count($ids), '?')); }
+
+// ---- request params ----
+$entity = strtolower((string)($_GET['entity'] ?? ''));
+$action = strtolower((string)($_GET['action'] ?? 'list'));
+$page = max(1, (int)($_GET['page'] ?? 1));
+$limit = min(250, max(1, (int)($_GET['limit'] ?? 50)));
+$offset = ($page - 1) * $limit;
+$singleId = isset($_GET['id']) ? (int)$_GET['id'] : 0;
+$updatedSince = isset($_GET['updated_since']) && preg_match('/^\d{4}-\d{2}-\d{2}( \d{2}:\d{2}:\d{2})?$/', (string)$_GET['updated_since']) ? (string)$_GET['updated_since'] : null;
+$storeId = (int)($_GET['store_id'] ?? 0);
+$languageId = (int)($_GET['language_id'] ?? 0);
+if (!$languageId) {
+    $langCode = setting($db, 'config_language', 'en-gb');
+    $lang = one($db, 'SELECT `language_id` FROM ' . t('language') . ' WHERE `code` = ?', [$langCode]);
+    $languageId = $lang ? (int)$lang['language_id'] : 1;
+}
+
+$storeName = decode_html(setting($db, 'config_name', ''));
+
+// ---- ping ----
+if ($entity === 'ping') {
+    $version = 'unknown';
+    $idx = __DIR__ . '/index.php';
+    if (is_file($idx) && preg_match("/define\\('VERSION',\\s*'([^']+)'\\)/", (string)file_get_contents($idx), $m)) $version = $m[1];
+    $counts = [];
+    foreach (['product', 'category', 'customer', 'order', 'coupon'] as $tbl) {
+        $counts[$tbl === 'category' ? 'categories' : $tbl . 's'] = (int)one($db, 'SELECT COUNT(*) AS c FROM ' . t($tbl))['c'];
+    }
+    respond(200, [
+        'ok' => true,
+        'bridge_version' => SYNCIFYPRO_BRIDGE_VERSION,
+        'platform' => 'opencart',
+        'opencart_version' => $version,
+        'store_name' => $storeName,
+        'store_url' => HTTP_SERVER,
+        'db_prefix' => $prefix,
+        'language_id' => $languageId,
+        'currency' => setting($db, 'config_currency', ''),
+        'counts' => $counts,
+        'server_time' => date('c'),
+    ]);
+}
+
+$validEntities = ['products', 'categories', 'customers', 'orders', 'coupons'];
+if (!in_array($entity, $validEntities, true)) {
+    respond(400, ['error' => 'Unknown entity', 'valid' => array_merge(['ping'], $validEntities)]);
+}
+
+// ---- build base WHERE for each entity ----
+$where = [];
+$params = [];
+switch ($entity) {
+    case 'products':
+        $base = 'FROM ' . t('product') . ' p';
+        if ($singleId) { $where[] = 'p.`product_id` = ?'; $params[] = $singleId; }
+        if ($updatedSince) { $where[] = 'p.`date_modified` >= ?'; $params[] = $updatedSince; }
+        $orderBy = 'p.`product_id` ASC';
+        break;
+    case 'categories':
+        $base = 'FROM ' . t('category') . ' c';
+        if ($singleId) { $where[] = 'c.`category_id` = ?'; $params[] = $singleId; }
+        $orderBy = 'c.`parent_id` ASC, c.`sort_order` ASC, c.`category_id` ASC';
+        break;
+    case 'customers':
+        $base = 'FROM ' . t('customer') . ' c';
+        if ($singleId) { $where[] = 'c.`customer_id` = ?'; $params[] = $singleId; }
+        if ($updatedSince) { $where[] = 'c.`date_added` >= ?'; $params[] = $updatedSince; }
+        $orderBy = 'c.`customer_id` ASC';
+        break;
+    case 'orders':
+        $base = 'FROM ' . t('order') . ' o';
+        $where[] = 'o.`order_status_id` > 0'; // OpenCart treats status 0 as "missing"/abandoned
+        if ($singleId) { $where[] = 'o.`order_id` = ?'; $params[] = $singleId; }
+        if ($updatedSince) { $where[] = 'o.`date_modified` >= ?'; $params[] = $updatedSince; }
+        $orderBy = 'o.`order_id` ASC';
+        break;
+    case 'coupons':
+        $base = 'FROM ' . t('coupon') . ' c';
+        if ($singleId) { $where[] = 'c.`coupon_id` = ?'; $params[] = $singleId; }
+        $orderBy = 'c.`coupon_id` ASC';
+        break;
+}
+$whereSql = $where ? ' WHERE ' . implode(' AND ', $where) : '';
+
+$total = (int)one($db, "SELECT COUNT(*) AS c $base$whereSql", $params)['c'];
+if ($action === 'count') {
+    respond(200, ['entity' => $entity, 'count' => $total]);
+}
+if ($action !== 'list') {
+    respond(400, ['error' => 'Unknown action', 'valid' => ['list', 'count']]);
+}
+
+$pageParams = array_merge($params, [$limit, $offset]);
+$data = [];
+
+switch ($entity) {
+    // =============================== PRODUCTS ===============================
+    case 'products':
+        $products = rows($db, "SELECT p.*, pd.`name`, pd.`description`, pd.`tag`, pd.`meta_title`, pd.`meta_description`, pd.`meta_keyword`,
+                m.`name` AS manufacturer, ss.`name` AS stock_status, wcd.`unit` AS weight_unit, lcd.`unit` AS length_unit, tc.`title` AS tax_class
+            $base
+            LEFT JOIN " . t('product_description') . " pd ON pd.`product_id` = p.`product_id` AND pd.`language_id` = $languageId
+            LEFT JOIN " . t('manufacturer') . " m ON m.`manufacturer_id` = p.`manufacturer_id`
+            LEFT JOIN " . t('stock_status') . " ss ON ss.`stock_status_id` = p.`stock_status_id` AND ss.`language_id` = $languageId
+            LEFT JOIN " . t('weight_class_description') . " wcd ON wcd.`weight_class_id` = p.`weight_class_id` AND wcd.`language_id` = $languageId
+            LEFT JOIN " . t('length_class_description') . " lcd ON lcd.`length_class_id` = p.`length_class_id` AND lcd.`language_id` = $languageId
+            LEFT JOIN " . t('tax_class') . " tc ON tc.`tax_class_id` = p.`tax_class_id`
+            $whereSql ORDER BY $orderBy LIMIT ? OFFSET ?", $pageParams);
+        if (!$products) break;
+        $ids = ids_in($products, 'product_id');
+        $ph = placeholders($ids);
+
+        // categories (names + full path)
+        $catRows = rows($db, 'SELECT p2c.`product_id`, p2c.`category_id`, cd.`name`, (SELECT GROUP_CONCAT(cd2.`name` ORDER BY cp.`level` SEPARATOR " > ") FROM ' . t('category_path') . ' cp JOIN ' . t('category_description') . " cd2 ON cd2.`category_id` = cp.`path_id` AND cd2.`language_id` = $languageId WHERE cp.`category_id` = p2c.`category_id`) AS path
+            FROM " . t('product_to_category') . ' p2c LEFT JOIN ' . t('category_description') . " cd ON cd.`category_id` = p2c.`category_id` AND cd.`language_id` = $languageId WHERE p2c.`product_id` IN ($ph)", $ids);
+        $cats = [];
+        foreach ($catRows as $r) $cats[(int)$r['product_id']][] = ['category_id' => (int)$r['category_id'], 'name' => decode_html($r['name']), 'path' => decode_html($r['path'])];
+
+        // additional images
+        $imgRows = rows($db, 'SELECT `product_id`, `image`, `sort_order` FROM ' . t('product_image') . " WHERE `product_id` IN ($ph) ORDER BY `sort_order`, `product_image_id`", $ids);
+        $imgs = [];
+        foreach ($imgRows as $r) $imgs[(int)$r['product_id']][] = image_url($r['image']);
+
+        // specials & discounts (4.0.2+: product_discount.special)
+        $discRows = rows($db, 'SELECT d.*, cgd.`name` AS customer_group FROM ' . t('product_discount') . ' d LEFT JOIN ' . t('customer_group_description') . " cgd ON cgd.`customer_group_id` = d.`customer_group_id` AND cgd.`language_id` = $languageId WHERE d.`product_id` IN ($ph) ORDER BY d.`priority`, d.`price`", $ids);
+        $specials = []; $discounts = [];
+        foreach ($discRows as $r) {
+            $entry = ['customer_group_id' => (int)$r['customer_group_id'], 'customer_group' => $r['customer_group'], 'quantity' => (int)$r['quantity'], 'priority' => (int)$r['priority'], 'price' => (float)$r['price'], 'type' => $r['type'] ?? 'F', 'date_start' => $r['date_start'] === '0000-00-00' ? null : $r['date_start'], 'date_end' => $r['date_end'] === '0000-00-00' ? null : $r['date_end']];
+            if (!empty($r['special'])) $specials[(int)$r['product_id']][] = $entry; else $discounts[(int)$r['product_id']][] = $entry;
+        }
+
+        // options + values
+        $optRows = rows($db, 'SELECT po.`product_option_id`, po.`product_id`, po.`option_id`, po.`value`, po.`required`, o.`type`, od.`name`
+            FROM ' . t('product_option') . ' po JOIN ' . t('option') . ' o ON o.`option_id` = po.`option_id` LEFT JOIN ' . t('option_description') . " od ON od.`option_id` = po.`option_id` AND od.`language_id` = $languageId
+            WHERE po.`product_id` IN ($ph) ORDER BY o.`sort_order`, po.`product_option_id`", $ids);
+        $valRows = rows($db, 'SELECT pov.*, ovd.`name`, ov.`image`, ov.`sort_order` FROM ' . t('product_option_value') . ' pov LEFT JOIN ' . t('option_value') . ' ov ON ov.`option_value_id` = pov.`option_value_id` LEFT JOIN ' . t('option_value_description') . " ovd ON ovd.`option_value_id` = pov.`option_value_id` AND ovd.`language_id` = $languageId WHERE pov.`product_id` IN ($ph) ORDER BY ov.`sort_order`, pov.`product_option_value_id`", $ids);
+        $valsByOpt = [];
+        foreach ($valRows as $r) {
+            $valsByOpt[(int)$r['product_option_id']][] = [
+                'product_option_value_id' => (int)$r['product_option_value_id'],
+                'option_value_id' => (int)$r['option_value_id'],
+                'name' => decode_html($r['name']),
+                'image' => image_url($r['image']),
+                'quantity' => (int)$r['quantity'],
+                'subtract' => (bool)$r['subtract'],
+                'price' => (float)$r['price'],
+                'price_prefix' => $r['price_prefix'],
+                'price_modifier' => ($r['price_prefix'] === '-' ? -1 : 1) * (float)$r['price'],
+                'points' => (int)$r['points'],
+                'points_prefix' => $r['points_prefix'],
+                'weight' => (float)$r['weight'],
+                'weight_prefix' => $r['weight_prefix'],
+            ];
+        }
+        $opts = [];
+        foreach ($optRows as $r) {
+            $opts[(int)$r['product_id']][] = [
+                'product_option_id' => (int)$r['product_option_id'],
+                'option_id' => (int)$r['option_id'],
+                'name' => decode_html($r['name']),
+                'type' => $r['type'],
+                'required' => (bool)$r['required'],
+                'value' => $r['value'],
+                'values' => $valsByOpt[(int)$r['product_option_id']] ?? [],
+            ];
+        }
+
+        // attributes
+        $attrRows = rows($db, 'SELECT pa.`product_id`, agd.`name` AS `group`, ad.`name`, pa.`text` FROM ' . t('product_attribute') . ' pa LEFT JOIN ' . t('attribute_description') . " ad ON ad.`attribute_id` = pa.`attribute_id` AND ad.`language_id` = $languageId LEFT JOIN " . t('attribute') . ' a ON a.`attribute_id` = pa.`attribute_id` LEFT JOIN ' . t('attribute_group_description') . " agd ON agd.`attribute_group_id` = a.`attribute_group_id` AND agd.`language_id` = $languageId WHERE pa.`product_id` IN ($ph) AND pa.`language_id` = $languageId", $ids);
+        $attrs = [];
+        foreach ($attrRows as $r) $attrs[(int)$r['product_id']][] = ['group' => decode_html($r['group']), 'name' => decode_html($r['name']), 'text' => decode_html($r['text'])];
+
+        // stores
+        $storeRows = rows($db, 'SELECT `product_id`, `store_id` FROM ' . t('product_to_store') . " WHERE `product_id` IN ($ph)", $ids);
+        $stores = [];
+        foreach ($storeRows as $r) $stores[(int)$r['product_id']][] = (int)$r['store_id'];
+
+        // variants (children pointing at this master)
+        $varRows = rows($db, 'SELECT `product_id`, `master_id` FROM ' . t('product') . " WHERE `master_id` IN ($ph)", $ids);
+        $children = [];
+        foreach ($varRows as $r) $children[(int)$r['master_id']][] = (int)$r['product_id'];
+
+        foreach ($products as $p) {
+            $pid = (int)$p['product_id'];
+            $data[] = [
+                'product_id' => $pid,
+                'master_id' => (int)$p['master_id'],
+                'is_variant' => (int)$p['master_id'] > 0,
+                'variant' => json_or_null($p['variant']),
+                'override' => json_or_null($p['override']),
+                'variant_product_ids' => $children[$pid] ?? [],
+                'model' => $p['model'],
+                'sku' => $p['sku'] ?? $p['model'], // OpenCart 4.1 removed the sku column; model is the merchant-facing code
+                'upc' => $p['upc'] ?? null, 'ean' => $p['ean'] ?? null, 'jan' => $p['jan'] ?? null, 'isbn' => $p['isbn'] ?? null, 'mpn' => $p['mpn'] ?? null,
+                'location' => $p['location'],
+                'name' => decode_html($p['name']),
+                'description' => decode_html($p['description']),
+                'tags' => decode_html($p['tag']),
+                'meta_title' => decode_html($p['meta_title']),
+                'meta_description' => decode_html($p['meta_description']),
+                'meta_keyword' => decode_html($p['meta_keyword']),
+                'price' => (float)$p['price'],
+                'special_price' => isset($specials[$pid][0]) ? (float)$specials[$pid][0]['price'] : null,
+                'specials' => $specials[$pid] ?? [],
+                'discounts' => $discounts[$pid] ?? [],
+                'tax_class_id' => (int)$p['tax_class_id'],
+                'tax_class' => $p['tax_class'],
+                'quantity' => (int)$p['quantity'],
+                'minimum' => (int)$p['minimum'],
+                'subtract' => (bool)$p['subtract'],
+                'stock_status' => $p['stock_status'],
+                'status' => (bool)$p['status'],
+                'shipping' => (bool)$p['shipping'],
+                'manufacturer_id' => (int)$p['manufacturer_id'],
+                'manufacturer' => $p['manufacturer'],
+                'categories' => array_map(fn($c) => $c['name'], $cats[$pid] ?? []),
+                'category_paths' => $cats[$pid] ?? [],
+                'image' => image_url($p['image']),
+                'additional_images' => $imgs[$pid] ?? [],
+                'options' => $opts[$pid] ?? [],
+                'attributes' => $attrs[$pid] ?? [],
+                'weight' => (float)$p['weight'],
+                'weight_unit' => $p['weight_unit'],
+                'length' => (float)$p['length'], 'width' => (float)$p['width'], 'height' => (float)$p['height'],
+                'length_unit' => $p['length_unit'],
+                'points' => (int)$p['points'],
+                'sort_order' => (int)$p['sort_order'],
+                'seo_keyword' => seo_keyword($db, 'product_id', (string)$pid, $languageId, $storeId),
+                'url' => rtrim(HTTP_SERVER, '/') . '/index.php?route=product/product&product_id=' . $pid,
+                'stores' => $stores[$pid] ?? [],
+                'date_available' => $p['date_available'],
+                'date_added' => $p['date_added'],
+                'date_modified' => $p['date_modified'],
+            ];
+        }
+        break;
+
+    // =============================== CATEGORIES ===============================
+    case 'categories':
+        $catsRows = rows($db, "SELECT c.*, cd.`name`, cd.`description`, cd.`meta_title`, cd.`meta_description`, cd.`meta_keyword`,
+                (SELECT GROUP_CONCAT(cd2.`name` ORDER BY cp.`level` SEPARATOR ' > ') FROM " . t('category_path') . ' cp JOIN ' . t('category_description') . " cd2 ON cd2.`category_id` = cp.`path_id` AND cd2.`language_id` = $languageId WHERE cp.`category_id` = c.`category_id`) AS path,
+                (SELECT COUNT(*) FROM " . t('product_to_category') . " p2c WHERE p2c.`category_id` = c.`category_id`) AS product_count
+            $base LEFT JOIN " . t('category_description') . " cd ON cd.`category_id` = c.`category_id` AND cd.`language_id` = $languageId
+            $whereSql ORDER BY $orderBy LIMIT ? OFFSET ?", $pageParams);
+        foreach ($catsRows as $c) {
+            $cid = (int)$c['category_id'];
+            $data[] = [
+                'category_id' => $cid,
+                'parent_id' => (int)$c['parent_id'],
+                'name' => decode_html($c['name']),
+                'path' => decode_html($c['path']),
+                'description' => decode_html($c['description']),
+                'meta_title' => decode_html($c['meta_title']),
+                'meta_description' => decode_html($c['meta_description']),
+                'meta_keyword' => decode_html($c['meta_keyword']),
+                'image' => image_url($c['image']),
+                'top' => isset($c['top']) ? (bool)$c['top'] : null,
+                'column' => isset($c['column']) ? (int)$c['column'] : null,
+                'sort_order' => (int)$c['sort_order'],
+                'status' => (bool)$c['status'],
+                'product_count' => (int)$c['product_count'],
+                'seo_keyword' => seo_keyword($db, 'path', (string)(one($db, 'SELECT GROUP_CONCAT(`path_id` ORDER BY `level` SEPARATOR "_") AS p FROM ' . t('category_path') . ' WHERE `category_id` = ?', [$cid])['p'] ?? $cid), $languageId, $storeId),
+                'date_added' => $c['date_added'] ?? null,
+                'date_modified' => $c['date_modified'] ?? null,
+            ];
+        }
+        break;
+
+    // =============================== CUSTOMERS ===============================
+    case 'customers':
+        $custRows = rows($db, "SELECT c.`customer_id`, c.`customer_group_id`, c.`store_id`, c.`language_id`, c.`firstname`, c.`lastname`, c.`email`, c.`telephone`, c.`custom_field`, c.`newsletter`, c.`ip`, c.`status`, c.`safe`, c.`date_added`, cgd.`name` AS customer_group
+            $base LEFT JOIN " . t('customer_group_description') . " cgd ON cgd.`customer_group_id` = c.`customer_group_id` AND cgd.`language_id` = $languageId
+            $whereSql ORDER BY $orderBy LIMIT ? OFFSET ?", $pageParams);
+        if (!$custRows) break;
+        $ids = ids_in($custRows, 'customer_id');
+        $ph = placeholders($ids);
+        $addrRows = rows($db, 'SELECT a.*, cod.`name` AS country, co.`iso_code_2`, co.`iso_code_3`, zd.`name` AS zone, z.`code` AS zone_code
+            FROM ' . t('address') . ' a LEFT JOIN ' . t('country') . ' co ON co.`country_id` = a.`country_id` LEFT JOIN ' . t('country_description') . " cod ON cod.`country_id` = a.`country_id` AND cod.`language_id` = $languageId LEFT JOIN " . t('zone') . ' z ON z.`zone_id` = a.`zone_id` LEFT JOIN ' . t('zone_description') . " zd ON zd.`zone_id` = a.`zone_id` AND zd.`language_id` = $languageId WHERE a.`customer_id` IN ($ph) ORDER BY a.`default` DESC, a.`address_id`", $ids);
+        $addrs = [];
+        foreach ($addrRows as $a) {
+            $addrs[(int)$a['customer_id']][] = [
+                'address_id' => (int)$a['address_id'],
+                'default' => (bool)$a['default'],
+                'firstname' => $a['firstname'], 'lastname' => $a['lastname'], 'company' => $a['company'],
+                'address_1' => $a['address_1'], 'address_2' => $a['address_2'], 'city' => $a['city'], 'postcode' => $a['postcode'],
+                'zone' => $a['zone'], 'zone_code' => $a['zone_code'], 'zone_id' => (int)$a['zone_id'],
+                'country' => $a['country'], 'country_code' => $a['iso_code_2'], 'country_id' => (int)$a['country_id'],
+                'custom_field' => json_or_null($a['custom_field']),
+            ];
+        }
+        $statRows = rows($db, 'SELECT `customer_id`, COUNT(*) AS order_count, COALESCE(SUM(`total`),0) AS total_spent, MAX(`date_added`) AS last_order FROM ' . t('order') . " WHERE `customer_id` IN ($ph) AND `order_status_id` > 0 GROUP BY `customer_id`", $ids);
+        $stats = [];
+        foreach ($statRows as $s) $stats[(int)$s['customer_id']] = $s;
+        foreach ($custRows as $c) {
+            $cid = (int)$c['customer_id'];
+            $data[] = [
+                'customer_id' => $cid,
+                'firstname' => $c['firstname'], 'lastname' => $c['lastname'],
+                'email' => $c['email'], 'telephone' => $c['telephone'],
+                'customer_group_id' => (int)$c['customer_group_id'], 'customer_group' => $c['customer_group'],
+                'store_id' => (int)$c['store_id'], 'language_id' => (int)$c['language_id'],
+                'newsletter' => (bool)$c['newsletter'], 'status' => (bool)$c['status'], 'safe' => (bool)$c['safe'],
+                'ip' => $c['ip'],
+                'custom_field' => json_or_null($c['custom_field']),
+                'addresses' => $addrs[$cid] ?? [],
+                'order_count' => (int)($stats[$cid]['order_count'] ?? 0),
+                'total_spent' => (float)($stats[$cid]['total_spent'] ?? 0),
+                'last_order_date' => $stats[$cid]['last_order'] ?? null,
+                'date_added' => $c['date_added'],
+            ];
+        }
+        break;
+
+    // =============================== ORDERS ===============================
+    case 'orders':
+        $orderRows = rows($db, "SELECT o.*, os.`name` AS status_name $base LEFT JOIN " . t('order_status') . " os ON os.`order_status_id` = o.`order_status_id` AND os.`language_id` = $languageId $whereSql ORDER BY $orderBy LIMIT ? OFFSET ?", $pageParams);
+        if (!$orderRows) break;
+        $ids = ids_in($orderRows, 'order_id');
+        $ph = placeholders($ids);
+        $lineRows = rows($db, 'SELECT * FROM ' . t('order_product') . " WHERE `order_id` IN ($ph) ORDER BY `order_product_id`", $ids);
+        $optRows = rows($db, 'SELECT * FROM ' . t('order_option') . " WHERE `order_id` IN ($ph) ORDER BY `order_option_id`", $ids);
+        $totalRows = rows($db, 'SELECT * FROM ' . t('order_total') . " WHERE `order_id` IN ($ph) ORDER BY `sort_order`, `order_total_id`", $ids);
+        $histRows = rows($db, 'SELECT h.*, os.`name` AS status_name FROM ' . t('order_history') . ' h LEFT JOIN ' . t('order_status') . " os ON os.`order_status_id` = h.`order_status_id` AND os.`language_id` = $languageId WHERE h.`order_id` IN ($ph) ORDER BY h.`date_added`, h.`order_history_id`", $ids);
+        $couponRows = rows($db, 'SELECT ch.`order_id`, ch.`amount`, c.`code`, c.`name` FROM ' . t('coupon_history') . ' ch JOIN ' . t('coupon') . " c ON c.`coupon_id` = ch.`coupon_id` WHERE ch.`order_id` IN ($ph)", $ids);
+        $optsByLine = [];
+        foreach ($optRows as $r) $optsByLine[(int)$r['order_product_id']][] = ['name' => decode_html($r['name']), 'value' => decode_html($r['value']), 'type' => $r['type'], 'product_option_id' => (int)$r['product_option_id'], 'product_option_value_id' => (int)$r['product_option_value_id']];
+        $lines = [];
+        foreach ($lineRows as $r) {
+            $lines[(int)$r['order_id']][] = [
+                'order_product_id' => (int)$r['order_product_id'],
+                'product_id' => (int)$r['product_id'],
+                'master_id' => (int)($r['master_id'] ?? 0),
+                'name' => decode_html($r['name']), 'model' => $r['model'],
+                'quantity' => (int)$r['quantity'], 'price' => (float)$r['price'], 'total' => (float)$r['total'], 'tax' => (float)$r['tax'], 'reward' => (int)$r['reward'],
+                'options' => $optsByLine[(int)$r['order_product_id']] ?? [],
+            ];
+        }
+        $totals = []; $hist = []; $coupons = [];
+        foreach ($totalRows as $r) $totals[(int)$r['order_id']][] = ['code' => $r['code'], 'extension' => $r['extension'] ?? null, 'title' => decode_html($r['title']), 'value' => (float)$r['value'], 'sort_order' => (int)$r['sort_order']];
+        foreach ($histRows as $r) $hist[(int)$r['order_id']][] = ['order_status_id' => (int)$r['order_status_id'], 'status' => $r['status_name'], 'notify' => (bool)$r['notify'], 'comment' => $r['comment'], 'date_added' => $r['date_added']];
+        foreach ($couponRows as $r) $coupons[(int)$r['order_id']][] = ['code' => $r['code'], 'name' => $r['name'], 'amount' => (float)$r['amount']];
+        $addr = function (array $o, string $pfx): array {
+            return [
+                'firstname' => $o[$pfx . 'firstname'], 'lastname' => $o[$pfx . 'lastname'], 'company' => $o[$pfx . 'company'],
+                'address_1' => $o[$pfx . 'address_1'], 'address_2' => $o[$pfx . 'address_2'], 'city' => $o[$pfx . 'city'], 'postcode' => $o[$pfx . 'postcode'],
+                'zone' => $o[$pfx . 'zone'], 'zone_id' => (int)$o[$pfx . 'zone_id'], 'country' => $o[$pfx . 'country'], 'country_id' => (int)$o[$pfx . 'country_id'],
+                'custom_field' => json_or_null($o[$pfx . 'custom_field'] ?? null),
+            ];
+        };
+        $methodName = function ($raw): array {
+            $d = json_or_null($raw);
+            if (is_array($d)) return ['name' => decode_html($d['name'] ?? ''), 'code' => $d['code'] ?? null];
+            return ['name' => decode_html((string)$raw), 'code' => null];
+        };
+        foreach ($orderRows as $o) {
+            $oid = (int)$o['order_id'];
+            $tt = [];
+            foreach ($totals[$oid] ?? [] as $t) $tt[$t['code']] = ($tt[$t['code']] ?? 0) + $t['value'];
+            $data[] = [
+                'order_id' => $oid,
+                'invoice_no' => (int)$o['invoice_no'], 'invoice_prefix' => $o['invoice_prefix'],
+                'invoice' => (int)$o['invoice_no'] ? $o['invoice_prefix'] . $o['invoice_no'] : null,
+                'store_id' => (int)$o['store_id'], 'store_name' => decode_html($o['store_name']),
+                'customer_id' => (int)$o['customer_id'],
+                'customer' => ['firstname' => $o['firstname'], 'lastname' => $o['lastname'], 'email' => $o['email'], 'telephone' => $o['telephone'], 'customer_group_id' => (int)$o['customer_group_id'], 'guest' => (int)$o['customer_id'] === 0],
+                'email' => $o['email'],
+                'order_status_id' => (int)$o['order_status_id'],
+                'status' => $o['status_name'],
+                'currency_code' => $o['currency_code'], 'currency_value' => (float)$o['currency_value'],
+                'total' => (float)$o['total'],
+                'subtotal' => $tt['sub_total'] ?? null, 'shipping_total' => $tt['shipping'] ?? null, 'tax_total' => $tt['tax'] ?? null, 'discount_total' => $tt['coupon'] ?? null,
+                'totals' => $totals[$oid] ?? [],
+                'coupons' => $coupons[$oid] ?? [],
+                'payment_method' => $methodName($o['payment_method']),
+                'shipping_method' => $methodName($o['shipping_method']),
+                'payment_address' => $addr($o, 'payment_'),
+                'shipping_address' => $addr($o, 'shipping_'),
+                'line_items' => $lines[$oid] ?? [],
+                'history' => $hist[$oid] ?? [],
+                'comment' => $o['comment'],
+                'tracking' => $o['tracking'] ?? null,
+                'transaction_id' => $o['transaction_id'] ?? null,
+                'affiliate_id' => (int)$o['affiliate_id'],
+                'language_code' => $o['language_code'],
+                'ip' => $o['ip'], 'user_agent' => $o['user_agent'],
+                'date_added' => $o['date_added'], 'date_modified' => $o['date_modified'],
+            ];
+        }
+        break;
+
+    // =============================== COUPONS ===============================
+    case 'coupons':
+        $cRows = rows($db, "SELECT c.* $base$whereSql ORDER BY $orderBy LIMIT ? OFFSET ?", $pageParams);
+        if (!$cRows) break;
+        $ids = ids_in($cRows, 'coupon_id');
+        $ph = placeholders($ids);
+        $cp = rows($db, 'SELECT cp.`coupon_id`, cp.`product_id`, pd.`name` FROM ' . t('coupon_product') . ' cp LEFT JOIN ' . t('product_description') . " pd ON pd.`product_id` = cp.`product_id` AND pd.`language_id` = $languageId WHERE cp.`coupon_id` IN ($ph)", $ids);
+        $cc = rows($db, 'SELECT cc.`coupon_id`, cc.`category_id`, cd.`name` FROM ' . t('coupon_category') . ' cc LEFT JOIN ' . t('category_description') . " cd ON cd.`category_id` = cc.`category_id` AND cd.`language_id` = $languageId WHERE cc.`coupon_id` IN ($ph)", $ids);
+        $ch = rows($db, 'SELECT `coupon_id`, COUNT(*) AS uses, COALESCE(SUM(`amount`),0) AS amount FROM ' . t('coupon_history') . " WHERE `coupon_id` IN ($ph) GROUP BY `coupon_id`", $ids);
+        $prods = []; $catsC = []; $uses = [];
+        foreach ($cp as $r) $prods[(int)$r['coupon_id']][] = ['product_id' => (int)$r['product_id'], 'name' => decode_html($r['name'])];
+        foreach ($cc as $r) $catsC[(int)$r['coupon_id']][] = ['category_id' => (int)$r['category_id'], 'name' => decode_html($r['name'])];
+        foreach ($ch as $r) $uses[(int)$r['coupon_id']] = $r;
+        foreach ($cRows as $c) {
+            $cid = (int)$c['coupon_id'];
+            $data[] = [
+                'coupon_id' => $cid,
+                'name' => decode_html($c['name']), 'code' => $c['code'],
+                'type' => $c['type'], 'type_label' => $c['type'] === 'P' ? 'percentage' : 'fixed_amount',
+                'discount' => (float)$c['discount'],
+                'minimum_total' => (float)$c['total'],
+                'logged_in_only' => (bool)$c['logged'], 'free_shipping' => (bool)$c['shipping'],
+                'date_start' => $c['date_start'] === '0000-00-00' ? null : $c['date_start'],
+                'date_end' => $c['date_end'] === '0000-00-00' ? null : $c['date_end'],
+                'uses_total' => (int)$c['uses_total'], 'uses_customer' => (int)$c['uses_customer'],
+                'times_used' => (int)($uses[$cid]['uses'] ?? 0), 'amount_used' => (float)($uses[$cid]['amount'] ?? 0),
+                'status' => (bool)$c['status'],
+                'products' => $prods[$cid] ?? [], 'categories' => $catsC[$cid] ?? [],
+                'date_added' => $c['date_added'],
+            ];
+        }
+        break;
+}
+
+respond(200, [
+    'entity' => $entity,
+    'page' => $page,
+    'limit' => $limit,
+    'count' => count($data),
+    'total' => $total,
+    'total_pages' => (int)ceil($total / $limit),
+    'has_more' => $offset + count($data) < $total,
+    'data' => $data,
+]);

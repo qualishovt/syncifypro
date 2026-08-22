@@ -44,7 +44,11 @@
       "mcp__shopify-dev-mcp__validate_component_codeblocks",
       "Bash(echo \"home exit: $?\")",
       "Bash(node -e \"const d=new Date\\('2026-07-03T08:39:31.849Z'\\); console.log\\('Started:', d.toLocaleString\\(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false,timeZone:'UTC',timeZoneName:'short'}\\)\\); console.log\\('file name: products-2026-07-03-08-39-34.csv'\\);\")",
-      "Bash(node --env-file=.env \"./_backfill.mjs\")"
+      "Bash(node --env-file=.env \"./_backfill.mjs\")",
+      "mcp__playwright__browser_resize",
+      "mcp__playwright__browser_run_code_unsafe",
+      "mcp__playwright__browser_take_screenshot",
+      "mcp__playwright__browser_close"
     ]
   },
   "enableAllProjectMcpServers": true,
