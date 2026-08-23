@@ -87,17 +87,15 @@ const SECURITY = [
   ["Shopify's data rules, followed", "Protected customer data handled per Shopify's requirements, with the mandatory privacy webhooks implemented."],
 ];
 
-const COMPARE_COLS = ["SyncifyPro", "Shopify CSV (built-in)", "By hand"];
+const COMPARE_COLS = ["SyncifyPro", "Matrixify", "Altera"];
 const COMPARE_ROWS = [
-  ["Data types covered", "32", "5", "—"],
-  ["File formats", "Excel, CSV, XML, JSON, PDF, Sheets", "CSV only", "—"],
-  ["Preview before anything is written", true, false, false],
-  ["Update only the columns you include", true, false, false],
-  ["Repeating, scheduled jobs", true, false, false],
-  ["Delivery to Email, FTP/SFTP, S3, Drive", true, false, false],
-  ["Migrate another platform in (+ redirects)", true, false, false],
-  ["Results file listing every change", true, false, false],
-  ["Handles six-figure catalogs", true, "Struggles on large files", false],
+  ["Shopify data types covered", "32", "18", "23"],
+  ["File formats", "Excel, CSV, XML, JSON, PDF, Sheets", "Excel, CSV, Sheets", "Excel, CSV, Sheets"],
+  ["Migrate from another platform", "WooCommerce, BigCommerce, Magento, PrestaShop, OpenCart", "Yes — platforms not listed", "WooCommerce"],
+  ["Scheduled, repeating jobs", true, true, "On paid plans, via CLI"],
+  ["Delivery to Email, FTP/SFTP, S3, Drive", "All four", "Not listed", "Google Drive"],
+  ["Built-in live chat support", true, "—", "—"],
+  ["Handles six-figure catalogs", true, true, true],
 ];
 
 const FAQ = [
@@ -266,7 +264,7 @@ export default function NewMarketing() {
         </section>
 
         {/* compare */}
-        <section id="compare" style={s.section}>
+        <section id="compare" style={{ ...s.section, ...s.sectionMint }}>
           <SectionHead kicker="Compare" title="Why merchants pick SyncifyPro" />
           <div style={s.tableWrap} className="nf-tablewrap">
             <table style={s.table}>
@@ -284,7 +282,7 @@ export default function NewMarketing() {
                     <th scope="row" style={s.rowHead}>{label}</th>
                     {cells.map((v, i) => (
                       <td key={COMPARE_COLS[i]} style={i === 0 ? s.tdUs : s.td}>
-                        {v === true ? <span style={s.yes}>✓</span> : v === false ? <span style={s.no}>—</span> : v}
+                        {v === true ? <span style={i === 0 ? s.yes : s.yesAlt}>✓</span> : v === false ? <span style={s.no}>—</span> : v}
                       </td>
                     ))}
                   </tr>
@@ -293,7 +291,8 @@ export default function NewMarketing() {
             </table>
           </div>
           <p style={s.tableFoot}>
-            Compared with Shopify&rsquo;s built-in CSV import/export and doing the same work by hand in spreadsheets.
+            Based on what each app publishes on its own site (matrixify.app, getaltera.com), checked 23 August 2026.
+            Feature sets change — please check their pages for the latest.
           </p>
         </section>
 
@@ -569,7 +568,7 @@ const THEME_CSS = `
   --mk-line: #e3ebe6; --mk-track: #eaf0ec; --mk-active: #e9f2ec; --mk-art-line: #cfe3d7;
   --mk-ink: #16302a; --mk-body: #5c6b63; --mk-muted: #8fa79b;
   --mk-green: #45795a; --mk-green-dark: #38634a; --mk-green-soft: #d7ecdf; --mk-green-ink: #1e5136;
-  --mk-blue-soft: #dbeaf5; --mk-blue-ink: #1f4d70;
+  --mk-blue-soft: #dbeaf5; --mk-blue-ink: #1f4d70; --mk-mint: #f2fbf6;
   color-scheme: light;
 }
 :root[data-theme="dark"] {
@@ -577,7 +576,7 @@ const THEME_CSS = `
   --mk-line: #25382f; --mk-track: #25382f; --mk-active: #1f3429; --mk-art-line: #2f4d3d;
   --mk-ink: #e8f0ec; --mk-body: #a9bbb1; --mk-muted: #7f948a;
   --mk-green: #5ea67b; --mk-green-dark: #4d8f66; --mk-green-soft: #1f3b2c; --mk-green-ink: #bfe5cd;
-  --mk-blue-soft: #1c2f3e; --mk-blue-ink: #a8cdea;
+  --mk-blue-soft: #1c2f3e; --mk-blue-ink: #a8cdea; --mk-mint: #101d17;
   color-scheme: dark;
 }
 .nf-theme { display: inline-flex; border: 1px solid var(--mk-line); border-radius: 999px; padding: 2px; gap: 2px; background: var(--mk-chip); flex: none; }
@@ -635,15 +634,16 @@ const s = {
   navLink: { color: INK, textDecoration: "none", fontSize: 18, fontWeight: 600 },
   compareBtnLg: { display: "inline-block", background: "var(--mk-card)", color: GREEN, textDecoration: "none", fontWeight: 700, fontSize: 16, padding: ".75rem 2.2rem", borderRadius: 6, border: "1px solid " + GREEN, cursor: "pointer" },
   navCta: { flex: "none", background: GREEN, color: "#fff", textDecoration: "none", fontWeight: 700, fontSize: 15, padding: ".6rem 1.6rem", borderRadius: 6, marginLeft: "auto", marginRight: "2rem", whiteSpace: "nowrap" },
-  tableWrap: { overflowX: "auto", border: "1px solid " + LINE, borderRadius: 16, background: "var(--mk-card)" },
+  tableWrap: { maxWidth: 1040, margin: "0 auto", overflowX: "auto", border: "1px solid " + LINE, borderRadius: 18, background: "var(--mk-card)", boxShadow: "0 14px 34px rgba(13,32,25,.07)" },
   table: { width: "100%", borderCollapse: "collapse", minWidth: 640 },
   thLabel: { textAlign: "left", padding: "1rem 1.2rem", borderBottom: "1px solid " + LINE, width: "38%" },
   th: { textAlign: "center", padding: "1rem .9rem", fontSize: 14.5, fontWeight: 700, color: "var(--mk-muted)", borderBottom: "1px solid " + LINE, borderLeft: "1px solid " + LINE },
-  thUs: { textAlign: "center", padding: "1rem .9rem", fontSize: 15.5, fontWeight: 700, color: "#fff", background: GREEN, borderBottom: "1px solid " + LINE, borderLeft: "1px solid " + LINE },
+  thUs: { textAlign: "center", padding: "1.1rem .9rem", fontSize: 16, fontWeight: 700, color: "#fff", background: GREEN, borderBottom: "1px solid " + LINE, borderLeft: "1px solid " + LINE },
   rowHead: { textAlign: "left", padding: ".85rem 1.2rem", fontSize: 14.5, fontWeight: 600, color: "var(--mk-ink)", borderBottom: "1px solid " + LINE },
   td: { textAlign: "center", padding: ".85rem .9rem", fontSize: 14, color: "var(--mk-body)", borderBottom: "1px solid " + LINE, borderLeft: "1px solid " + LINE },
   tdUs: { textAlign: "center", padding: ".85rem .9rem", fontSize: 14, fontWeight: 600, color: "var(--mk-ink)", background: "var(--mk-green-soft)", borderBottom: "1px solid " + LINE, borderLeft: "1px solid " + LINE },
-  yes: { color: "var(--mk-green-ink)", fontWeight: 700, fontSize: 17 },
+  yes: { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, borderRadius: 999, background: "var(--mk-green)", color: "#fff", fontSize: 12, fontWeight: 700 },
+  yesAlt: { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, borderRadius: 999, background: "var(--mk-green-soft)", color: "var(--mk-green-ink)", fontSize: 12, fontWeight: 700 },
   no: { color: "var(--mk-muted)" },
   tableFoot: { textAlign: "center", marginTop: "1.1rem", fontSize: 13.5, color: "var(--mk-muted)" },
 
@@ -682,6 +682,7 @@ const s = {
 
   section: { maxWidth: 1160, margin: "0 auto", padding: "4.5rem 2rem" },
   sectionSoft: { maxWidth: "none", background: "var(--mk-shade)", margin: 0 },
+  sectionMint: { maxWidth: "none", background: "var(--mk-mint)", margin: 0 },
   sectionDark: { maxWidth: "none", background: `linear-gradient(160deg,#0f2e1f,#08160f)`, margin: 0 },
   secHead: { textAlign: "center", maxWidth: 640, margin: "0 auto 2.6rem" },
   kicker: { fontSize: 13, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: GREEN },
