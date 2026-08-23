@@ -12,6 +12,7 @@ import { useEffect, useState } from "react";
 import { redirect, Form, useLoaderData } from "react-router";
 import { login } from "../shopify.server";
 import PlatformLogo from "../components/PlatformLogos.jsx";
+import { ResourcesMenu, MENU_CSS } from "../components/SiteChrome.jsx";
 
 export const meta = () => [
   { title: "SyncifyPro — Bulk Export, Import, Update, Schedule & Migrate for Shopify" },
@@ -27,7 +28,7 @@ export const loader = async ({ request }) => {
 
 /* ── content (mirrors routes/_index) ───────────────────────────────────────── */
 
-const NAV = [["How it works", "#how"], ["Data types", "#data"], ["Migrate", "#migrate"], ["Resources", "/resources"], ["Blog", "/blog"]];
+const NAV = [["How it works", "#how"], ["Data types", "#data"], ["Migrate", "#migrate"]];
 
 const SI = { viewBox: "0 0 24 24", width: 24, height: 24, fill: "none", stroke: "currentColor", strokeWidth: 1.9, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true };
 const STAT_ICONS = {
@@ -132,7 +133,7 @@ export default function NewMarketing() {
   const { showForm } = useLoaderData();
   return (
     <div style={s.root}>
-      <style dangerouslySetInnerHTML={{ __html: THEME_CSS + CSS }} />
+      <style dangerouslySetInnerHTML={{ __html: THEME_CSS + MENU_CSS + CSS }} />
       <script dangerouslySetInnerHTML={{ __html: THEME_BOOT }} />
 
       <header style={s.header} className="nf-header">
@@ -142,6 +143,8 @@ export default function NewMarketing() {
         </a>
         <nav style={s.nav} className="nf-nav">
           {NAV.map(([l, h]) => <a key={h} href={h} style={s.navLink}>{l}</a>)}
+          <ResourcesMenu />
+          <a href="/blog" style={s.navLink}>Blog</a>
         </nav>
         <ThemeToggle />
         <a href="#install" style={s.navCta} className="nf-install-top">Install</a>

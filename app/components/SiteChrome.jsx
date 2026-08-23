@@ -21,12 +21,20 @@ export const SANS = "'Segoe UI', Helvetica, Arial, sans-serif";
 export const SITE_NAV = [
   ["How it works", "/new#how"],
   ["Data types", "/new#data"],
-  ["Migrate", "/new#migrate"],
-  ["Resources", "/resources"],
-  ["Blog", "/blog"],
+  ["Compare", "/new#compare"],
 ];
 
-export const THEME_CSS = `
+/** The Resources drop-down — mirrors Matrixify's Knowledge menu, adapted to us. */
+export const RESOURCES_MENU = [
+  ["Documentation", "/resources/documentation", "How every part of the app works"],
+  ["Tutorials & guides", "/resources/tutorials", "Step-by-step for common jobs"],
+  ["Migrate to Shopify", "/resources/migrate", "One walkthrough per platform"],
+  ["Data feeds", "/resources/data-feeds", "Scheduled product feeds"],
+  ["Expert help", "/resources/experts", "Have us do the migration"],
+  ["What's new", "/changelog", "Recent releases and fixes"],
+];
+
+export const BASE_CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&display=swap');
 :root {
   --mk-bg: #fff; --mk-card: #fff; --mk-surface: #fbfcfb; --mk-shade: #f5f8f6; --mk-chip: #f1f5f2;
@@ -59,6 +67,21 @@ export const THEME_CSS = `
 }
 `;
 
+export const MENU_CSS = `
+.sc-menu { position: relative; display: inline-block; }
+.sc-menu > button { display: inline-flex; align-items: center; gap: 5px; background: transparent; border: 0; padding: 0; cursor: pointer; font: inherit; color: var(--mk-ink); font-weight: 600; }
+.sc-menu > button svg { width: 12px; height: 12px; transition: transform .16s ease; }
+.sc-menu[data-open="true"] > button svg { transform: rotate(180deg); }
+.sc-menu-panel { position: absolute; top: calc(100% + 14px); left: 50%; transform: translateX(-50%); min-width: 300px; background: var(--mk-card); border: 1px solid var(--mk-line); border-radius: 14px; box-shadow: 0 22px 48px rgba(13,32,25,.16); padding: .5rem; z-index: 40; }
+.sc-menu-panel a { display: block; padding: .6rem .8rem; border-radius: 9px; text-decoration: none; }
+.sc-menu-panel a:hover { background: var(--mk-mint); }
+.sc-menu-panel strong { display: block; font-size: 15px; font-weight: 700; color: var(--mk-ink); }
+.sc-menu-panel span { display: block; font-size: 13px; color: var(--mk-muted); }
+@media (max-width: 900px) { .sc-menu { display: none !important; } }
+`;
+
+export const THEME_CSS = BASE_CSS + MENU_CSS;
+
 export const THEME_BOOT = `(function(){var k="sp-theme",m=matchMedia("(prefers-color-scheme: dark)");function a(){var p=localStorage.getItem(k)||"light";var d=p==="dark"||(p==="device"&&m.matches);document.documentElement.setAttribute("data-theme",d?"dark":"light");}window.__applyTheme=a;a();m.addEventListener("change",a);})();`;
 
 const THEME_KEY = "sp-theme";
@@ -81,6 +104,34 @@ export function ThemeToggle() {
   );
 }
 
+/** Hover- and click-openable menu; closes on Escape, outside click or blur. */
+export function ResourcesMenu() {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
+    const onClick = (e) => { if (!e.target.closest?.(".sc-menu")) setOpen(false); };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("click", onClick);
+    return () => { document.removeEventListener("keydown", onKey); document.removeEventListener("click", onClick); };
+  }, [open]);
+  return (
+    <div className="sc-menu" data-open={open} onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
+      <button type="button" aria-expanded={open} aria-haspopup="true" onClick={() => setOpen((v) => !v)} style={c.navLink}>
+        Resources
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+      </button>
+      {open && (
+        <div className="sc-menu-panel">
+          {RESOURCES_MENU.map(([label, href, desc]) => (
+            <a key={href} href={href}><strong>{label}</strong><span>{desc}</span></a>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function SiteHeader() {
   return (
     <header style={c.header}>
@@ -90,6 +141,8 @@ export function SiteHeader() {
       </a>
       <nav style={c.nav} className="sc-nav">
         {SITE_NAV.map(([label, href]) => <a key={href} href={href} style={c.navLink}>{label}</a>)}
+        <ResourcesMenu />
+        <a href="/blog" style={c.navLink}>Blog</a>
       </nav>
       <ThemeToggle />
       <a href="/new#install" style={c.install} className="sc-install">Install</a>
