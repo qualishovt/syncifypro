@@ -27,7 +27,7 @@ export const loader = async ({ request }) => {
 
 /* ── content (mirrors routes/_index) ───────────────────────────────────────── */
 
-const NAV = [["How it works", "#how"], ["Features", "#features"], ["Data", "#data"], ["Migrate", "#migrate"], ["FAQ", "#faq"]];
+const NAV = [["How it works", "#how"], ["Data types", "#data"], ["Migrate", "#migrate"], ["Security", "#security"]];
 
 const STATS = [
   ["32", "data types"],
@@ -288,8 +288,53 @@ function SectionHead({ kicker, title, dark }) {
   );
 }
 
-/** The homepage app-mock: a Shopify-admin window showing an import job. */
-function AppMock() {
+/** The hero app-mock: a slideshow through SyncifyPro's sections. */
+const MOCK_NAV = ["Home", "Export", "Import", "Schedules", "Migrations", "Activity"];
+
+function SlideHome() {
+  return (
+    <>
+      <div style={mock.crumb}>SyncifyPro / Home</div>
+      <div style={mock.homeCard}>
+        <p style={mock.cardTitle}>Export</p>
+        <p style={mock.cardBody}>Products, orders, customers and more to Excel, CSV, JSON or XML.</p>
+        <span style={mock.cardBtn}>New export</span>
+      </div>
+      <div style={mock.homeCard}>
+        <p style={mock.cardTitle}>Import</p>
+        <div style={mock.drop}>Add file or drop it here</div>
+      </div>
+    </>
+  );
+}
+
+function SlideExport() {
+  const rows = [["Products", "12,480"], ["Variants", "18,204"], ["Collections", "96"], ["Customers", "3,902"], ["Orders", "11,540"]];
+  return (
+    <>
+      <div style={mock.crumb}>SyncifyPro / Export: Products</div>
+      <div style={mock.badges}>
+        <span style={mock.badgeGreen}>Format: Excel</span>
+        <span style={mock.badge}>Filters: 2</span>
+        <span style={mock.badge}>Columns: 24</span>
+      </div>
+      <p style={mock.sheetsLabel}>What to export</p>
+      {rows.map(([name, count], i) => (
+        <div key={name} style={mock.sheetRow} className="nf-sheetrow">
+          <span style={mock.rowLeft}>
+            <span style={i < 2 ? mock.checkOn : mock.checkOff}>{i < 2 ? "✓" : ""}</span>
+            {name}
+          </span>
+          <span style={mock.sheetTags} className="nf-sheettags">
+            <span style={mock.tagTotal}>{count}</span>
+          </span>
+        </div>
+      ))}
+    </>
+  );
+}
+
+function SlideImport() {
   const sheets = [
     ["Products", "New: 6", "Updated: 4", "Total: 10"],
     ["Custom Collections", "New: 2", "Updated: 1", "Total: 3"],
@@ -297,30 +342,153 @@ function AppMock() {
     ["Orders", "New: 1", null, "Total: 1"],
   ];
   return (
-    <div style={mock.window} className="nf-mock">
-      <div style={mock.side} className="nf-mock-side">
-        {["Home", "Export", "Import", "Schedules", "Migrations", "Activity"].map((it, i) => (
-          <span key={it} style={{ ...mock.sideItem, ...(i === 2 ? mock.sideItemActive : null) }}>{it}</span>
-        ))}
+    <>
+      <div style={mock.crumb}>SyncifyPro / Import: #10024</div>
+      <div style={mock.badges}>
+        <span style={mock.badgeGreen}>In progress</span>
+        <span style={mock.badge}>Format: Excel</span>
+        <span style={mock.badge}>Started: 09:12</span>
       </div>
-      <div style={mock.main}>
-        <div style={mock.crumb}>SyncifyPro / Import: #10024</div>
-        <div style={mock.badges}>
-          <span style={mock.badgeGreen}>In progress</span>
-          <span style={mock.badge}>Format: Excel</span>
-          <span style={mock.badge}>Started: 09:12</span>
+      <div style={mock.progressTrack}><div style={mock.progressFill} /></div>
+      <p style={mock.sheetsLabel}>Sheets</p>
+      {sheets.map(([name, a, b, total]) => (
+        <div key={name} style={mock.sheetRow} className="nf-sheetrow">
+          <span style={mock.sheetName}>{name}</span>
+          <span style={mock.sheetTags} className="nf-sheettags">
+            {a && <span style={mock.tagNew}>{a}</span>}
+            {b && <span style={mock.tagUpd}>{b}</span>}
+            <span style={mock.tagTotal}>{total}</span>
+          </span>
         </div>
-        <div style={mock.progressTrack}><div style={mock.progressFill} /></div>
-        <p style={mock.sheetsLabel}>Sheets</p>
-        {sheets.map(([name, a, b, total]) => (
-          <div key={name} style={mock.sheetRow} className="nf-sheetrow">
-            <span style={mock.sheetName}>{name}</span>
-            <span style={mock.sheetTags} className="nf-sheettags">
-              {a && <span style={mock.tagNew}>{a}</span>}
-              {b && <span style={mock.tagUpd}>{b}</span>}
-              <span style={mock.tagTotal}>{total}</span>
-            </span>
-          </div>
+      ))}
+    </>
+  );
+}
+
+function SlideSchedules() {
+  const rows = [
+    ["Daily products export", "Daily 06:00", "Email"],
+    ["Weekly orders backup", "Weekly · Mon", "Amazon S3"],
+    ["Hourly inventory sync", "Hourly", "FTP / SFTP"],
+    ["Monthly customers", "Monthly · 1st", "Google Drive"],
+  ];
+  return (
+    <>
+      <div style={mock.crumb}>SyncifyPro / Schedules</div>
+      <div style={mock.badges}>
+        <span style={mock.badgeGreen}>4 active</span>
+        <span style={mock.badge}>Next run: 06:00</span>
+      </div>
+      <p style={mock.sheetsLabel}>Scheduled jobs</p>
+      {rows.map(([name, freq, dest]) => (
+        <div key={name} style={mock.sheetRow} className="nf-sheetrow">
+          <span style={mock.rowLeft}><span style={mock.dot} />{name}</span>
+          <span style={mock.sheetTags} className="nf-sheettags">
+            <span style={mock.tagUpd}>{freq}</span>
+            <span style={mock.tagTotal}>{dest}</span>
+          </span>
+        </div>
+      ))}
+    </>
+  );
+}
+
+function SlideMigrations() {
+  const rows = [
+    ["woocommerce", "WooCommerce", true],
+    ["bigcommerce", "BigCommerce", true],
+    ["magento", "Magento", true],
+    ["prestashop", "PrestaShop", false],
+    ["opencart", "OpenCart", false],
+  ];
+  return (
+    <>
+      <div style={mock.crumb}>SyncifyPro / Migrations</div>
+      <div style={mock.badges}>
+        <span style={mock.badgeGreen}>3 connected</span>
+        <span style={mock.badge}>Redirects: on</span>
+      </div>
+      <p style={mock.sheetsLabel}>Source platforms</p>
+      {rows.map(([id, name, on]) => (
+        <div key={id} style={mock.sheetRow} className="nf-sheetrow">
+          <span style={mock.rowLeft}><PlatformLogo id={id} size={16} />{name}</span>
+          <span style={mock.sheetTags} className="nf-sheettags">
+            <span style={on ? mock.tagNew : mock.tagTotal}>{on ? "Connected" : "Not connected"}</span>
+          </span>
+        </div>
+      ))}
+    </>
+  );
+}
+
+function SlideActivity() {
+  const rows = [
+    ["Products export", "Completed", "12,480 rows"],
+    ["Customers import", "Completed", "3,902 rows"],
+    ["Orders export", "Running", "62%"],
+    ["Inventory update", "Completed", "640 rows"],
+  ];
+  return (
+    <>
+      <div style={mock.crumb}>SyncifyPro / Activity</div>
+      <div style={mock.badges}>
+        <span style={mock.badgeGreen}>Today</span>
+        <span style={mock.badge}>4 jobs</span>
+      </div>
+      <p style={mock.sheetsLabel}>Recent jobs</p>
+      {rows.map(([name, status, detail]) => (
+        <div key={name} style={mock.sheetRow} className="nf-sheetrow">
+          <span style={mock.rowLeft}>{name}</span>
+          <span style={mock.sheetTags} className="nf-sheettags">
+            <span style={status === "Running" ? mock.tagRun : mock.tagNew}>{status}</span>
+            <span style={mock.tagTotal}>{detail}</span>
+          </span>
+        </div>
+      ))}
+    </>
+  );
+}
+
+const SLIDES = [SlideHome, SlideExport, SlideImport, SlideSchedules, SlideMigrations, SlideActivity];
+const SLIDE_MS = 4500;
+
+function AppMock() {
+  const [i, setI] = useState(2);      // opens on the Import job
+  const [paused, setPaused] = useState(false);
+
+  useEffect(() => {
+    if (paused) return undefined;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return undefined;
+    const id = setInterval(() => setI((n) => (n + 1) % SLIDES.length), SLIDE_MS);
+    return () => clearInterval(id);
+  }, [paused]);
+
+  const Slide = SLIDES[i];
+  return (
+    <div>
+      <div
+        style={mock.window}
+        className="nf-mock"
+        onMouseEnter={() => setPaused(true)}
+        onMouseLeave={() => setPaused(false)}
+      >
+        <div style={mock.side} className="nf-mock-side">
+          {MOCK_NAV.map((it, n) => (
+            <button
+              key={it}
+              type="button"
+              onClick={() => setI(n)}
+              style={{ ...mock.sideBtn, ...(n === i ? mock.sideItemActive : null) }}
+            >
+              {it}
+            </button>
+          ))}
+        </div>
+        <div style={mock.main} className="nf-slide" key={i}><Slide /></div>
+      </div>
+      <div style={mock.dots} className="nf-dots">
+        {SLIDES.map((_, n) => (
+          <button key={MOCK_NAV[n]} type="button" aria-label={"Show " + MOCK_NAV[n]} aria-current={n === i} onClick={() => setI(n)} />
         ))}
       </div>
     </div>
@@ -360,6 +528,11 @@ const THEME_BOOT = `(function(){var k="sp-theme",m=matchMedia("(prefers-color-sc
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&display=swap');
 .nf-faq summary::-webkit-details-marker { display:none; }
+.nf-slide { animation: nfFade .4s ease; }
+@keyframes nfFade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.nf-dots button { width: 7px; height: 7px; border-radius: 999px; border: 0; padding: 0; background: var(--mk-line); cursor: pointer; transition: width .2s ease, background .2s ease; }
+.nf-dots button[aria-current="true"] { width: 18px; background: var(--mk-green); }
+@media (prefers-reduced-motion: reduce) { .nf-slide { animation: none; } }
 .nf-faq[open] .nf-faqplus { transform: rotate(45deg); }
 .nf-fcard { transition: transform .18s ease, box-shadow .18s ease; }
 .nf-fcard:hover { transform: translateY(-3px); box-shadow: 0 22px 44px rgba(13,32,25,.12); }
@@ -396,7 +569,7 @@ const s = {
   brand: { display: "inline-flex", alignItems: "center", gap: 10, textDecoration: "none", flex: "none", padding: "1rem 0 1rem 2rem" },
   brandName: { fontSize: 20, fontWeight: 700, color: INK, letterSpacing: "-.01em" },
   nav: { display: "flex", gap: "2.2rem", flexWrap: "wrap", flex: 1, justifyContent: "center", padding: ".5rem 0" },
-  navLink: { color: INK, textDecoration: "none", fontSize: 15.5, fontWeight: 600 },
+  navLink: { color: INK, textDecoration: "none", fontSize: 17, fontWeight: 600 },
   navCta: { flex: "none", background: GREEN, color: "#fff", textDecoration: "none", fontWeight: 700, fontSize: 15, padding: ".6rem 1.6rem", borderRadius: 6, marginLeft: "auto", marginRight: "2rem", whiteSpace: "nowrap" },
 
   hero: { position: "relative", background: "var(--mk-shade)", color: BODY, overflow: "hidden" },
@@ -490,7 +663,19 @@ const mock = {
   side: { width: 168, background: "var(--mk-surface)", borderRight: `1px solid ${LINE}`, padding: ".9rem .6rem", flex: "none" },
   sideItem: { display: "block", fontSize: 13.5, color: "var(--mk-muted)", padding: ".42rem .6rem", borderRadius: 6 },
   sideItemActive: { background: "var(--mk-active)", color: "var(--mk-ink)", fontWeight: 700 },
-  main: { flex: 1, padding: "1.1rem 1.3rem", minWidth: 0 },
+  main: { flex: 1, padding: "1.1rem 1.3rem", minWidth: 0, minHeight: 320 },
+  sideBtn: { display: "block", width: "100%", textAlign: "left", fontSize: 13.5, color: "var(--mk-muted)", padding: ".42rem .6rem", borderRadius: 6, background: "transparent", border: 0, cursor: "pointer", fontFamily: "inherit" },
+  rowLeft: { display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13.5, color: "var(--mk-ink)", fontWeight: 600, whiteSpace: "nowrap" },
+  checkOn: { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 15, height: 15, borderRadius: 4, background: "var(--mk-green)", color: "#fff", fontSize: 10, lineHeight: 1, flex: "none" },
+  checkOff: { display: "inline-block", width: 15, height: 15, borderRadius: 4, border: "1px solid " + LINE, flex: "none" },
+  dot: { display: "inline-block", width: 8, height: 8, borderRadius: 999, background: "var(--mk-green)", flex: "none" },
+  tagRun: { fontSize: 11.5, color: "#8a5a00", background: "#ffe9b8", borderRadius: 999, padding: ".12rem .5rem" },
+  homeCard: { border: "1px solid " + LINE, borderRadius: 10, padding: ".85rem 1rem", marginBottom: ".7rem" },
+  cardTitle: { margin: 0, fontSize: 13.5, fontWeight: 700, color: "var(--mk-ink)" },
+  cardBody: { margin: ".3rem 0 .6rem", fontSize: 12.5, color: "var(--mk-body)" },
+  cardBtn: { display: "inline-block", fontSize: 12, fontWeight: 700, color: "#fff", background: "var(--mk-green)", borderRadius: 6, padding: ".3rem .8rem" },
+  drop: { border: "1px dashed " + LINE, borderRadius: 8, padding: "1.1rem", textAlign: "center", fontSize: 12.5, color: "var(--mk-muted)" },
+  dots: { display: "flex", gap: 6, justifyContent: "center", marginTop: 14 },
   crumb: { fontSize: 13, color: "var(--mk-muted)", marginBottom: ".7rem" },
   badges: { display: "flex", gap: ".45rem", flexWrap: "wrap", marginBottom: "1rem" },
   badge: { fontSize: 12, color: "var(--mk-body)", background: "var(--mk-chip)", borderRadius: 999, padding: ".2rem .6rem" },
