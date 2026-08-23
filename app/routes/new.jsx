@@ -182,6 +182,7 @@ export default function NewMarketing() {
               </div>
             ))}
           </div>
+          <div style={s.statRule}><div style={s.statRuleLine} /></div>
         </section>
 
         {/* formats strip */}
@@ -651,6 +652,8 @@ const s = {
   heroArt: { minWidth: 0 },
   installBtnLg: { display: "inline-block", background: "var(--mk-green)", color: "#fff", textDecoration: "none", fontWeight: 700, fontSize: 16, padding: ".75rem 2.2rem", borderRadius: 6, border: "none", cursor: "pointer", boxShadow: "0 2px 0 #38634a" },
   statSection: { padding: "2.5rem 0 0" },
+  statRule: { maxWidth: 1200, margin: "2.2rem auto 0", padding: "0 2rem" },
+  statRuleLine: { height: 1, background: LINE },
   heroGlow: { position: "absolute", top: "-30%", right: "-12%", width: "55vw", height: "55vw", background: "radial-gradient(circle, rgba(51,160,108,.14), transparent 62%)", pointerEvents: "none" },
   heroInner: { position: "relative", display: "grid", gridTemplateColumns: "minmax(300px, 5fr) minmax(320px, 7fr)", alignItems: "center", gap: "2rem", padding: "3.5rem 0 3.5rem 6vw" },
   heroCol: { display: "flex", flexDirection: "column", alignItems: "flex-start" },
