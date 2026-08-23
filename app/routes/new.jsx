@@ -355,7 +355,7 @@ const s = {
   navLink: { color: INK, textDecoration: "none", fontSize: 15, fontWeight: 600, opacity: .85 },
   navCta: { flex: "none", background: GREEN, color: "#fff", textDecoration: "none", fontWeight: 700, fontSize: 14.5, padding: ".6rem 1.3rem", borderRadius: 999 },
 
-  hero: { position: "relative", background: `linear-gradient(160deg, #08160f 0%, #0f2e1f 55%, #123a27 100%)`, color: "#dce9e2", padding: "4.5rem 2rem 0", overflow: "hidden" },
+  hero: { position: "relative", background: `linear-gradient(160deg, #08160f 0%, #0f2e1f 55%, #123a27 100%)`, color: "#dce9e2", padding: "4.5rem 2rem 4rem", overflow: "hidden" },
   heroGlow: { position: "absolute", top: "-30%", right: "-10%", width: "60vw", height: "60vw", background: `radial-gradient(circle, rgba(51,160,108,.35), transparent 60%)`, pointerEvents: "none" },
   heroInner: { position: "relative", maxWidth: 1160, margin: "0 auto", display: "grid", gridTemplateColumns: "1.05fr .95fr", gap: "3rem", alignItems: "center" },
   heroCol: { display: "flex", flexDirection: "column", alignItems: "flex-start" },
@@ -371,12 +371,12 @@ const s = {
   proofText: { fontSize: 13.5, color: "#9fb8ac" },
   heroArt: { position: "relative" },
 
-  statBand: { position: "relative", maxWidth: 1160, margin: "3.5rem auto 0", display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: "1px", background: "rgba(255,255,255,.1)", border: "1px solid rgba(255,255,255,.1)", borderRadius: 16, overflow: "hidden", transform: "translateY(38px)" },
+  statBand: { position: "relative", maxWidth: 1160, margin: "3.5rem auto 0", display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: "1px", background: "rgba(255,255,255,.1)", border: "1px solid rgba(255,255,255,.1)", borderRadius: 16, overflow: "hidden" },
   stat: { background: "#0c211700", backdropFilter: "blur(4px)", padding: "1.4rem 1rem", textAlign: "center" },
   statNum: { fontFamily: HEAD, fontSize: "1.9rem", fontWeight: 700, color: "#fff" },
   statLabel: { fontSize: 13.5, color: "#9fb8ac", marginTop: 2 },
 
-  strip: { maxWidth: 1160, margin: "0 auto", padding: "4.5rem 2rem 1rem", textAlign: "center" },
+  strip: { maxWidth: 1160, margin: "0 auto", padding: "3.5rem 2rem 1rem", textAlign: "center" },
   stripLabel: { fontSize: 12.5, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "#9db3a7", margin: "0 0 1rem" },
   stripRow: { display: "flex", flexWrap: "wrap", gap: ".6rem", justifyContent: "center" },
   formatPill: { fontSize: 14, fontWeight: 600, color: INK, background: MINT, border: `1px solid ${LINE}`, borderRadius: 999, padding: ".45rem 1rem" },
