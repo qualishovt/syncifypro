@@ -106,36 +106,24 @@ export default function NewMarketing() {
       </header>
 
       <main>
-        {/* hero */}
+        {/* hero — identical to the homepage hero */}
         <section style={s.hero} className="nf-hero">
-          <div style={s.heroGlow} aria-hidden="true" />
           <div style={s.heroInner} className="nf-hero-inner">
-            <div style={s.heroCol} className="nf-hero-col">
-              <span style={s.eyebrow}>Shopify data, on your terms</span>
-              <h1 style={s.h1} className="nf-h1">Bulk export, import, update &amp; migrate — without the busywork</h1>
-              <p style={s.heroSub}>
-                SyncifyPro turns your Shopify store into human-readable spreadsheets you can edit and
-                import back in minutes — then schedules the whole thing so it runs itself.
+            <div style={s.heroText} className="nf-hero-text">
+              <p style={s.heroKicker}>Shopify App</p>
+              <h1 style={s.h1}>SyncifyPro: Shopify Data Bulk Export, Import, Update &amp; Migrate</h1>
+              <p style={s.heroSub} className="nf-hero-sub">
+                Manage your Shopify store data by bulk exporting and importing human-readable Excel and
+                CSV files — and migrate a whole store from another platform.
               </p>
-              <div style={s.heroBtns}>
-                {showForm ? (
-                  <Form method="post" action="/auth/login" style={s.heroForm} className="nf-heroform">
-                    <input style={s.heroInput} type="text" name="shop" placeholder="your-store.myshopify.com" aria-label="Shop domain" autoComplete="off" />
-                    <button style={s.btnPrimary} type="submit">Install</button>
-                  </Form>
-                ) : (
-                  <a href="#install" style={s.btnPrimary}>Install</a>
-                )}
-              </div>
-              <div style={s.proof}>
-                <span style={s.stars}>★★★★★</span>
-                <span style={s.proofText}>Built for merchants &amp; agencies · No credit card to install</span>
-              </div>
+              <a href="#install" style={s.installBtnLg} className="nf-install-hero">Install</a>
             </div>
-            <div style={s.heroArt} className="nf-hero-art"><AppMock /></div>
+            <div style={s.heroArt}><AppMock /></div>
           </div>
+        </section>
 
-          {/* stat band */}
+        {/* stat band */}
+        <section style={s.statSection}>
           <div style={s.statBand} className="nf-stats">
             {STATS.map(([n, l]) => (
               <div key={l} style={s.stat}>
@@ -277,34 +265,37 @@ function SectionHead({ kicker, title, dark }) {
   );
 }
 
-/** A compact browser-window mock of an import job (self-contained). */
+/** The homepage app-mock: a Shopify-admin window showing an import job. */
 function AppMock() {
-  const rows = [
-    ["Products", "New 6", "Upd 4"],
-    ["Collections", "New 2", "Upd 1"],
-    ["Customers", "—", "Upd 1"],
-    ["Orders", "New 1", "—"],
+  const sheets = [
+    ["Products", "New: 6", "Updated: 4", "Total: 10"],
+    ["Custom Collections", "New: 2", "Updated: 1", "Total: 3"],
+    ["Customers", "Updated: 1", null, "Total: 1"],
+    ["Orders", "New: 1", null, "Total: 1"],
   ];
   return (
-    <div style={mock.win}>
-      <div style={mock.bar}>
-        <span style={{ ...mock.dot, background: "#ff5f57" }} /><span style={{ ...mock.dot, background: "#febc2e" }} /><span style={{ ...mock.dot, background: "#28c840" }} />
-        <span style={mock.url}>SyncifyPro · Import #10024</span>
+    <div style={mock.window} className="nf-mock">
+      <div style={mock.side} className="nf-mock-side">
+        {["Home", "Export", "Import", "Schedules", "Migrations", "Activity"].map((it, i) => (
+          <span key={it} style={{ ...mock.sideItem, ...(i === 2 ? mock.sideItemActive : null) }}>{it}</span>
+        ))}
       </div>
-      <div style={mock.body}>
+      <div style={mock.main}>
+        <div style={mock.crumb}>SyncifyPro / Import: #10024</div>
         <div style={mock.badges}>
           <span style={mock.badgeGreen}>In progress</span>
-          <span style={mock.badge}>Excel</span>
-          <span style={mock.badge}>09:12</span>
+          <span style={mock.badge}>Format: Excel</span>
+          <span style={mock.badge}>Started: 09:12</span>
         </div>
-        <div style={mock.track}><div style={mock.fill} /></div>
-        <p style={mock.sheetsLbl}>Sheets</p>
-        {rows.map(([n, a, b]) => (
-          <div key={n} style={mock.row}>
-            <span style={mock.rowName}>{n}</span>
-            <span style={mock.rowTags}>
-              {a !== "—" && <span style={mock.tagNew}>{a}</span>}
-              {b !== "—" && <span style={mock.tagUpd}>{b}</span>}
+        <div style={mock.progressTrack}><div style={mock.progressFill} /></div>
+        <p style={mock.sheetsLabel}>Sheets</p>
+        {sheets.map(([name, a, b, total]) => (
+          <div key={name} style={mock.sheetRow} className="nf-sheetrow">
+            <span style={mock.sheetName}>{name}</span>
+            <span style={mock.sheetTags} className="nf-sheettags">
+              {a && <span style={mock.tagNew}>{a}</span>}
+              {b && <span style={mock.tagUpd}>{b}</span>}
+              <span style={mock.tagTotal}>{total}</span>
             </span>
           </div>
         ))}
@@ -328,10 +319,11 @@ const CSS = `
 .nf-srccard, .nf-datachip { transition: transform .15s ease; }
 @media (max-width: 900px) {
   .nf-nav { display:none !important; }
-  .nf-hero-inner { grid-template-columns: 1fr !important; text-align:center; }
-  .nf-hero-col { align-items:center !important; }
-  .nf-heroform, .nf-ctaform { margin-left:auto; margin-right:auto; }
-  .nf-hero-art { margin: 0 auto !important; max-width: 460px; }
+  .nf-hero-inner { grid-template-columns: 1fr !important; padding: 2.5rem 1.25rem !important; text-align:center; }
+  .nf-hero-text { max-width:100% !important; margin:0 auto; }
+  .nf-hero-sub { max-width:100% !important; margin-left:auto !important; margin-right:auto !important; }
+  .nf-ctaform { margin-left:auto; margin-right:auto; }
+  .nf-hero-art { margin: 0 auto !important; max-width: 520px; }
   .nf-bento { grid-template-columns: 1fr !important; }
   .nf-fcard-big { grid-column: auto !important; }
   .nf-steps, .nf-secgrid, .nf-footcols { grid-template-columns: 1fr !important; }
@@ -339,9 +331,11 @@ const CSS = `
   .nf-srcgrid { grid-template-columns: repeat(2,1fr) !important; }
 }
 @media (max-width: 560px) {
-  .nf-h1 { font-size: 2rem !important; }
-  .nf-heroform, .nf-ctaform { flex-direction: column !important; }
-  .nf-heroform input, .nf-ctaform input { width: 100% !important; }
+  .nf-ctaform { flex-direction: column !important; }
+  .nf-ctaform input { width: 100% !important; }
+  .nf-mock-side { display:none !important; }
+  .nf-sheetrow { flex-direction: column !important; align-items: flex-start !important; gap:.4rem !important; }
+  .nf-sheettags { justify-content: flex-start !important; }
 }
 `;
 
@@ -356,12 +350,17 @@ const s = {
   navCta: { flex: "none", background: GREEN, color: "#fff", textDecoration: "none", fontWeight: 700, fontSize: 14.5, padding: ".6rem 1.3rem", borderRadius: 999 },
 
   hero: { position: "relative", background: "#f5f8f6", color: BODY, overflow: "hidden" },
+  heroText: { maxWidth: 520 },
+  heroKicker: { margin: 0, fontSize: 15, fontWeight: 700, color: "#8fa79b", letterSpacing: ".02em" },
+  heroArt: { minWidth: 0 },
+  installBtnLg: { display: "inline-block", background: "#45795a", color: "#fff", textDecoration: "none", fontWeight: 700, fontSize: 16, padding: ".75rem 2.2rem", borderRadius: 6, border: "none", cursor: "pointer", boxShadow: "0 2px 0 #38634a" },
+  statSection: { padding: "2.5rem 0 0" },
   heroGlow: { position: "absolute", top: "-30%", right: "-12%", width: "55vw", height: "55vw", background: "radial-gradient(circle, rgba(51,160,108,.14), transparent 62%)", pointerEvents: "none" },
   heroInner: { position: "relative", display: "grid", gridTemplateColumns: "minmax(300px, 5fr) minmax(320px, 7fr)", alignItems: "center", gap: "2rem", padding: "3.5rem 0 3.5rem 6vw" },
   heroCol: { display: "flex", flexDirection: "column", alignItems: "flex-start" },
   eyebrow: { display: "inline-block", fontSize: 13, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: GREEN, background: "#e4f3ea", border: "1px solid #cbe7d6", borderRadius: 999, padding: ".35rem .9rem" },
-  h1: { fontFamily: HEAD, fontSize: "clamp(2.2rem, 4.4vw, 3.4rem)", lineHeight: 1.08, letterSpacing: "-.025em", color: INK, margin: "1.2rem 0 0", maxWidth: 620 },
-  heroSub: { fontSize: "clamp(1rem, 1.5vw, 1.18rem)", color: BODY, margin: "1.1rem 0 1.8rem", maxWidth: 540 },
+  h1: { fontSize: "clamp(1.9rem, 3.4vw, 2.6rem)", lineHeight: 1.22, color: "#16302a", fontWeight: 700, letterSpacing: "-.02em", margin: ".6rem 0 0", maxWidth: 520 },
+  heroSub: { fontSize: "1.02rem", margin: "1.1rem 0 1.8rem", maxWidth: 460, color: "#5c6b63" },
   heroBtns: { width: "100%" },
   heroForm: { display: "flex", gap: ".6rem", maxWidth: 480 },
   heroInput: { flex: "1 1 auto", minWidth: 0, padding: ".85rem 1rem", fontSize: 15, borderRadius: 10, border: `1px solid ${LINE}`, background: "#fff", color: INK },
@@ -369,9 +368,8 @@ const s = {
   proof: { display: "flex", alignItems: "center", gap: ".7rem", marginTop: "1.3rem", flexWrap: "wrap" },
   stars: { color: AMBER, letterSpacing: "2px", fontSize: 15 },
   proofText: { fontSize: 13.5, color: "#7d9489" },
-  heroArt: { position: "relative" },
 
-  statBand: { position: "relative", width: "92%", maxWidth: 880, margin: "0 auto 3rem", display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: "1px", background: LINE, border: `1px solid ${LINE}`, borderRadius: 14, overflow: "hidden" },
+  statBand: { position: "relative", width: "92%", maxWidth: 880, margin: "0 auto", display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: "1px", background: LINE, border: `1px solid ${LINE}`, borderRadius: 14, overflow: "hidden" },
   stat: { background: "#fff", padding: "1rem .75rem", textAlign: "center" },
   statNum: { fontFamily: HEAD, fontSize: "1.6rem", fontWeight: 700, color: INK },
   statLabel: { fontSize: 12.5, color: "#7d9489", marginTop: 2 },
@@ -438,20 +436,22 @@ const s = {
 };
 
 const mock = {
-  win: { background: "#fff", borderRadius: 16, border: `1px solid ${LINE}`, boxShadow: "0 24px 50px rgba(13,32,25,.16)", overflow: "hidden" },
-  bar: { display: "flex", alignItems: "center", gap: 7, padding: ".7rem 1rem", background: "#f3f6f4", borderBottom: `1px solid ${LINE}` },
-  dot: { width: 11, height: 11, borderRadius: "50%" },
-  url: { marginLeft: ".6rem", fontSize: 12.5, color: "#7d9489" },
-  body: { padding: "1.2rem 1.3rem" },
-  badges: { display: "flex", gap: ".4rem", marginBottom: "1rem" },
+  window: { display: "flex", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, boxShadow: "0 18px 40px rgba(22,48,42,.12)", overflow: "hidden", minHeight: 380 },
+  side: { width: 168, background: "#fbfcfb", borderRight: `1px solid ${LINE}`, padding: ".9rem .6rem", flex: "none" },
+  sideItem: { display: "block", fontSize: 13.5, color: "#8fa79b", padding: ".42rem .6rem", borderRadius: 6 },
+  sideItemActive: { background: "#e9f2ec", color: "#16302a", fontWeight: 700 },
+  main: { flex: 1, padding: "1.1rem 1.3rem", minWidth: 0 },
+  crumb: { fontSize: 13, color: "#8fa79b", marginBottom: ".7rem" },
+  badges: { display: "flex", gap: ".45rem", flexWrap: "wrap", marginBottom: "1rem" },
   badge: { fontSize: 12, color: "#5c6b63", background: "#f1f5f2", borderRadius: 999, padding: ".2rem .6rem" },
   badgeGreen: { fontSize: 12, color: "#1e5136", background: "#d7ecdf", borderRadius: 999, padding: ".2rem .6rem", fontWeight: 600 },
-  track: { height: 8, borderRadius: 999, background: "#eaf0ec", overflow: "hidden" },
-  fill: { width: "72%", height: "100%", background: GREEN2 },
-  sheetsLbl: { fontSize: 13, fontWeight: 700, color: INK, margin: "1.1rem 0 .4rem" },
-  row: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: ".5rem 0", borderTop: `1px solid ${LINE}` },
-  rowName: { fontSize: 13.5, fontWeight: 600, color: INK },
-  rowTags: { display: "inline-flex", gap: ".35rem" },
+  progressTrack: { height: 8, borderRadius: 999, background: "#eaf0ec", overflow: "hidden" },
+  progressFill: { width: "72%", height: "100%", background: "#45795a", borderRadius: 999 },
+  sheetsLabel: { fontSize: 13, fontWeight: 700, color: "#16302a", margin: "1.1rem 0 .5rem" },
+  sheetRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: ".8rem", padding: ".55rem 0", borderTop: `1px solid ${LINE}` },
+  sheetName: { fontSize: 13.5, color: "#16302a", fontWeight: 600, whiteSpace: "nowrap" },
+  sheetTags: { display: "inline-flex", gap: ".35rem", flexWrap: "wrap", justifyContent: "flex-end" },
   tagNew: { fontSize: 11.5, color: "#1e5136", background: "#d7ecdf", borderRadius: 999, padding: ".12rem .5rem" },
   tagUpd: { fontSize: 11.5, color: "#1f4d70", background: "#dbeaf5", borderRadius: 999, padding: ".12rem .5rem" },
+  tagTotal: { fontSize: 11.5, color: "#5c6b63", background: "#f1f5f2", borderRadius: 999, padding: ".12rem .5rem" },
 };
