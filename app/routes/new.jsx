@@ -102,7 +102,7 @@ export default function NewMarketing() {
         <nav style={s.nav} className="nf-nav">
           {NAV.map(([l, h]) => <a key={h} href={h} style={s.navLink}>{l}</a>)}
         </nav>
-        <a href="#install" style={s.navCta} className="nf-headcta">Install free</a>
+        <a href="#install" style={s.navCta} className="nf-headcta">Install</a>
       </header>
 
       <main>
@@ -121,10 +121,10 @@ export default function NewMarketing() {
                 {showForm ? (
                   <Form method="post" action="/auth/login" style={s.heroForm} className="nf-heroform">
                     <input style={s.heroInput} type="text" name="shop" placeholder="your-store.myshopify.com" aria-label="Shop domain" autoComplete="off" />
-                    <button style={s.btnPrimary} type="submit">Install free</button>
+                    <button style={s.btnPrimary} type="submit">Install</button>
                   </Form>
                 ) : (
-                  <a href="#install" style={s.btnPrimary}>Install free</a>
+                  <a href="#install" style={s.btnPrimary}>Install</a>
                 )}
               </div>
               <div style={s.proof}>
@@ -241,11 +241,11 @@ export default function NewMarketing() {
         <section id="install" style={s.ctaWrap}>
           <div style={s.ctaCard} className="nf-cta">
             <h2 style={s.ctaTitle}>Start managing your Shopify data today</h2>
-            <p style={s.ctaSub}>Install free and run your first export in under a minute.</p>
+            <p style={s.ctaSub}>Install and run your first export in under a minute.</p>
             {showForm && (
               <Form method="post" action="/auth/login" style={s.ctaForm} className="nf-ctaform">
                 <input style={s.ctaInput} type="text" name="shop" placeholder="your-store.myshopify.com" aria-label="Shop domain" autoComplete="off" />
-                <button style={s.btnPrimary} type="submit">Install free</button>
+                <button style={s.btnPrimary} type="submit">Install</button>
               </Form>
             )}
           </div>
@@ -355,26 +355,26 @@ const s = {
   navLink: { color: INK, textDecoration: "none", fontSize: 15, fontWeight: 600, opacity: .85 },
   navCta: { flex: "none", background: GREEN, color: "#fff", textDecoration: "none", fontWeight: 700, fontSize: 14.5, padding: ".6rem 1.3rem", borderRadius: 999 },
 
-  hero: { position: "relative", background: `linear-gradient(160deg, #08160f 0%, #0f2e1f 55%, #123a27 100%)`, color: "#dce9e2", padding: "4.5rem 2rem 4rem", overflow: "hidden" },
-  heroGlow: { position: "absolute", top: "-30%", right: "-10%", width: "60vw", height: "60vw", background: `radial-gradient(circle, rgba(51,160,108,.35), transparent 60%)`, pointerEvents: "none" },
-  heroInner: { position: "relative", maxWidth: 1160, margin: "0 auto", display: "grid", gridTemplateColumns: "1.05fr .95fr", gap: "3rem", alignItems: "center" },
+  hero: { position: "relative", background: "#f5f8f6", color: BODY, padding: "4.5rem 2rem 4rem", overflow: "hidden" },
+  heroGlow: { position: "absolute", top: "-30%", right: "-12%", width: "55vw", height: "55vw", background: "radial-gradient(circle, rgba(51,160,108,.14), transparent 62%)", pointerEvents: "none" },
+  heroInner: { position: "relative", maxWidth: 1320, margin: "0 auto", display: "grid", gridTemplateColumns: "1.1fr .9fr", gap: "3.5rem", alignItems: "center" },
   heroCol: { display: "flex", flexDirection: "column", alignItems: "flex-start" },
-  eyebrow: { display: "inline-block", fontSize: 13, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: "#8fe3b8", background: "rgba(51,160,108,.14)", border: "1px solid rgba(143,227,184,.3)", borderRadius: 999, padding: ".35rem .9rem" },
-  h1: { fontFamily: HEAD, fontSize: "clamp(2.2rem, 4.4vw, 3.4rem)", lineHeight: 1.08, letterSpacing: "-.025em", color: "#fff", margin: "1.2rem 0 0" },
-  heroSub: { fontSize: "clamp(1rem, 1.5vw, 1.18rem)", color: "#bcd3c8", margin: "1.1rem 0 1.8rem", maxWidth: 540 },
+  eyebrow: { display: "inline-block", fontSize: 13, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: GREEN, background: "#e4f3ea", border: "1px solid #cbe7d6", borderRadius: 999, padding: ".35rem .9rem" },
+  h1: { fontFamily: HEAD, fontSize: "clamp(2.6rem, 5.4vw, 4.3rem)", lineHeight: 1.05, letterSpacing: "-.03em", color: INK, margin: "1.3rem 0 0", maxWidth: 720 },
+  heroSub: { fontSize: "clamp(1.08rem, 1.7vw, 1.32rem)", color: BODY, margin: "1.2rem 0 1.9rem", maxWidth: 620 },
   heroBtns: { width: "100%" },
   heroForm: { display: "flex", gap: ".6rem", maxWidth: 480 },
-  heroInput: { flex: "1 1 auto", minWidth: 0, padding: ".85rem 1rem", fontSize: 15, borderRadius: 10, border: "1px solid rgba(255,255,255,.18)", background: "rgba(255,255,255,.06)", color: "#fff" },
+  heroInput: { flex: "1 1 auto", minWidth: 0, padding: ".85rem 1rem", fontSize: 15, borderRadius: 10, border: `1px solid ${LINE}`, background: "#fff", color: INK },
   btnPrimary: { flex: "none", background: `linear-gradient(180deg, ${GREEN2}, ${GREEN})`, color: "#fff", border: "none", fontWeight: 700, fontSize: 15, padding: ".85rem 1.6rem", borderRadius: 10, cursor: "pointer", textDecoration: "none", whiteSpace: "nowrap", boxShadow: "0 10px 24px rgba(31,122,82,.4)" },
   proof: { display: "flex", alignItems: "center", gap: ".7rem", marginTop: "1.3rem", flexWrap: "wrap" },
   stars: { color: AMBER, letterSpacing: "2px", fontSize: 15 },
-  proofText: { fontSize: 13.5, color: "#9fb8ac" },
+  proofText: { fontSize: 13.5, color: "#7d9489" },
   heroArt: { position: "relative" },
 
-  statBand: { position: "relative", maxWidth: 1160, margin: "3.5rem auto 0", display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: "1px", background: "rgba(255,255,255,.1)", border: "1px solid rgba(255,255,255,.1)", borderRadius: 16, overflow: "hidden" },
-  stat: { background: "#0c211700", backdropFilter: "blur(4px)", padding: "1.4rem 1rem", textAlign: "center" },
-  statNum: { fontFamily: HEAD, fontSize: "1.9rem", fontWeight: 700, color: "#fff" },
-  statLabel: { fontSize: 13.5, color: "#9fb8ac", marginTop: 2 },
+  statBand: { position: "relative", maxWidth: 1320, margin: "3.5rem auto 0", display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: "1px", background: LINE, border: `1px solid ${LINE}`, borderRadius: 16, overflow: "hidden" },
+  stat: { background: "#fff", padding: "1.5rem 1rem", textAlign: "center" },
+  statNum: { fontFamily: HEAD, fontSize: "2.1rem", fontWeight: 700, color: INK },
+  statLabel: { fontSize: 13.5, color: "#7d9489", marginTop: 2 },
 
   strip: { maxWidth: 1160, margin: "0 auto", padding: "3.5rem 2rem 1rem", textAlign: "center" },
   stripLabel: { fontSize: 12.5, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "#9db3a7", margin: "0 0 1rem" },
@@ -438,7 +438,7 @@ const s = {
 };
 
 const mock = {
-  win: { background: "#fff", borderRadius: 16, border: `1px solid ${LINE}`, boxShadow: "0 30px 60px rgba(0,0,0,.35)", overflow: "hidden" },
+  win: { background: "#fff", borderRadius: 16, border: `1px solid ${LINE}`, boxShadow: "0 24px 50px rgba(13,32,25,.16)", overflow: "hidden" },
   bar: { display: "flex", alignItems: "center", gap: 7, padding: ".7rem 1rem", background: "#f3f6f4", borderBottom: `1px solid ${LINE}` },
   dot: { width: 11, height: 11, borderRadius: "50%" },
   url: { marginLeft: ".6rem", fontSize: 12.5, color: "#7d9489" },
