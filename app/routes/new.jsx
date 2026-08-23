@@ -79,6 +79,19 @@ const SECURITY = [
   ["Shopify's data rules, followed", "Protected customer data handled per Shopify's requirements, with the mandatory privacy webhooks implemented."],
 ];
 
+const COMPARE_COLS = ["SyncifyPro", "Shopify CSV (built-in)", "By hand"];
+const COMPARE_ROWS = [
+  ["Data types covered", "32", "5", "—"],
+  ["File formats", "Excel, CSV, XML, JSON, PDF, Sheets", "CSV only", "—"],
+  ["Preview before anything is written", true, false, false],
+  ["Update only the columns you include", true, false, false],
+  ["Repeating, scheduled jobs", true, false, false],
+  ["Delivery to Email, FTP/SFTP, S3, Drive", true, false, false],
+  ["Migrate another platform in (+ redirects)", true, false, false],
+  ["Results file listing every change", true, false, false],
+  ["Handles six-figure catalogs", true, "Struggles on large files", false],
+];
+
 const FAQ = [
   ["Is it compatible with Matrixify files?", "SyncifyPro uses the same human-readable, round-trip spreadsheet approach, so if you already work that way you'll feel at home — export, edit, import."],
   ["How big a catalog can it handle?", "From ten products to well over a million. Large exports switch to Shopify's bulk operations automatically, so there's no practical ceiling."],
@@ -125,6 +138,7 @@ export default function NewMarketing() {
           {NAV.map(([l, h]) => <a key={h} href={h} style={s.navLink}>{l}</a>)}
         </nav>
         <ThemeToggle />
+        <a href="#compare" style={s.navGhost} className="nf-compare-top">Compare</a>
         <a href="#install" style={s.navCta} className="nf-install-top">Install</a>
       </header>
 
@@ -233,6 +247,38 @@ export default function NewMarketing() {
               </article>
             ))}
           </div>
+        </section>
+
+        {/* compare */}
+        <section id="compare" style={s.section}>
+          <SectionHead kicker="Compare" title="Why merchants pick SyncifyPro" />
+          <div style={s.tableWrap} className="nf-tablewrap">
+            <table style={s.table}>
+              <thead>
+                <tr>
+                  <th style={s.thLabel}> </th>
+                  {COMPARE_COLS.map((c, i) => (
+                    <th key={c} style={i === 0 ? s.thUs : s.th}>{c}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {COMPARE_ROWS.map(([label, ...cells]) => (
+                  <tr key={label}>
+                    <th scope="row" style={s.rowHead}>{label}</th>
+                    {cells.map((v, i) => (
+                      <td key={COMPARE_COLS[i]} style={i === 0 ? s.tdUs : s.td}>
+                        {v === true ? <span style={s.yes}>✓</span> : v === false ? <span style={s.no}>—</span> : v}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p style={s.tableFoot}>
+            Compared with Shopify&rsquo;s built-in CSV import/export and doing the same work by hand in spreadsheets.
+          </p>
         </section>
 
         {/* FAQ */}
@@ -542,6 +588,7 @@ const CSS = `
   .nf-nav { display:none !important; }
   .nf-brand { padding-left: 1.25rem !important; }
   .nf-theme { margin-left: auto; }
+  .nf-compare-top { display: none !important; }
   .nf-install-top { margin-left: .6rem !important; margin-right: 1.25rem !important; padding: .55rem 1.2rem !important; }
   .nf-hero-inner { grid-template-columns: 1fr !important; padding: 2.5rem 1.25rem !important; text-align:center; }
   .nf-hero-text { max-width:100% !important; margin:0 auto; }
@@ -571,7 +618,19 @@ const s = {
   brandName: { fontSize: 20, fontWeight: 700, color: INK, letterSpacing: "-.01em" },
   nav: { display: "flex", gap: "2.2rem", flexWrap: "wrap", flex: 1, justifyContent: "center", padding: ".5rem 0" },
   navLink: { color: INK, textDecoration: "none", fontSize: 17, fontWeight: 600 },
-  navCta: { flex: "none", background: GREEN, color: "#fff", textDecoration: "none", fontWeight: 700, fontSize: 15, padding: ".6rem 1.6rem", borderRadius: 6, marginLeft: "auto", marginRight: "2rem", whiteSpace: "nowrap" },
+  navGhost: { flex: "none", background: "transparent", color: INK, textDecoration: "none", fontWeight: 700, fontSize: 15, padding: ".55rem 1.2rem", borderRadius: 6, border: "1px solid " + LINE, marginLeft: "auto", whiteSpace: "nowrap" },
+  navCta: { flex: "none", background: GREEN, color: "#fff", textDecoration: "none", fontWeight: 700, fontSize: 15, padding: ".6rem 1.6rem", borderRadius: 6, marginLeft: ".6rem", marginRight: "2rem", whiteSpace: "nowrap" },
+  tableWrap: { overflowX: "auto", border: "1px solid " + LINE, borderRadius: 16, background: "var(--mk-card)" },
+  table: { width: "100%", borderCollapse: "collapse", minWidth: 640 },
+  thLabel: { textAlign: "left", padding: "1rem 1.2rem", borderBottom: "1px solid " + LINE, width: "38%" },
+  th: { textAlign: "center", padding: "1rem .9rem", fontSize: 14.5, fontWeight: 700, color: "var(--mk-muted)", borderBottom: "1px solid " + LINE, borderLeft: "1px solid " + LINE },
+  thUs: { textAlign: "center", padding: "1rem .9rem", fontSize: 15.5, fontWeight: 700, color: "#fff", background: GREEN, borderBottom: "1px solid " + LINE, borderLeft: "1px solid " + LINE },
+  rowHead: { textAlign: "left", padding: ".85rem 1.2rem", fontSize: 14.5, fontWeight: 600, color: "var(--mk-ink)", borderBottom: "1px solid " + LINE },
+  td: { textAlign: "center", padding: ".85rem .9rem", fontSize: 14, color: "var(--mk-body)", borderBottom: "1px solid " + LINE, borderLeft: "1px solid " + LINE },
+  tdUs: { textAlign: "center", padding: ".85rem .9rem", fontSize: 14, fontWeight: 600, color: "var(--mk-ink)", background: "var(--mk-green-soft)", borderBottom: "1px solid " + LINE, borderLeft: "1px solid " + LINE },
+  yes: { color: "var(--mk-green-ink)", fontWeight: 700, fontSize: 17 },
+  no: { color: "var(--mk-muted)" },
+  tableFoot: { textAlign: "center", marginTop: "1.1rem", fontSize: 13.5, color: "var(--mk-muted)" },
 
   hero: { position: "relative", background: "var(--mk-shade)", color: BODY, overflow: "hidden" },
   heroText: { maxWidth: 520 },
