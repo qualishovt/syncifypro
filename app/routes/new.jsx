@@ -146,7 +146,6 @@ export default function NewMarketing() {
           {NAV.map(([l, h]) => <a key={h} href={h} style={s.navLink}>{l}</a>)}
         </nav>
         <ThemeToggle />
-        <a href="#compare" style={s.navGhost} className="nf-compare-top">Compare</a>
         <a href="#install" style={s.navCta} className="nf-install-top">Install</a>
       </header>
 
@@ -161,7 +160,10 @@ export default function NewMarketing() {
                 Manage your Shopify store data by bulk exporting and importing human-readable Excel and
                 CSV files — and migrate a whole store from another platform.
               </p>
-              <a href="#install" style={s.installBtnLg} className="nf-install-hero">Install</a>
+              <div style={s.heroBtns}>
+                <a href="#install" style={s.installBtnLg}>Install</a>
+                <a href="#compare" style={s.compareBtnLg}>Compare</a>
+              </div>
             </div>
             <div style={s.heroArt}><AppMock /></div>
           </div>
@@ -602,7 +604,6 @@ const CSS = `
   .nf-nav { display:none !important; }
   .nf-brand { padding-left: 1.25rem !important; }
   .nf-theme { margin-left: auto; }
-  .nf-compare-top { display: none !important; }
   .nf-install-top { margin-left: .6rem !important; margin-right: 1.25rem !important; padding: .55rem 1.2rem !important; }
   .nf-hero-inner { grid-template-columns: 1fr !important; padding: 2.5rem 1.25rem !important; text-align:center; }
   .nf-hero-text { max-width:100% !important; margin:0 auto; }
@@ -631,9 +632,9 @@ const s = {
   brand: { display: "inline-flex", alignItems: "center", gap: 10, textDecoration: "none", flex: "none", padding: "1rem 0 1rem 2rem" },
   brandName: { fontSize: 20, fontWeight: 700, color: INK, letterSpacing: "-.01em" },
   nav: { display: "flex", gap: "2.2rem", flexWrap: "wrap", flex: 1, justifyContent: "center", padding: ".5rem 0" },
-  navLink: { color: INK, textDecoration: "none", fontSize: 19, fontWeight: 600 },
-  navGhost: { flex: "none", background: "transparent", color: INK, textDecoration: "none", fontWeight: 700, fontSize: 15, padding: ".55rem 1.2rem", borderRadius: 6, border: "1px solid " + LINE, marginLeft: "auto", whiteSpace: "nowrap" },
-  navCta: { flex: "none", background: GREEN, color: "#fff", textDecoration: "none", fontWeight: 700, fontSize: 15, padding: ".6rem 1.6rem", borderRadius: 6, marginLeft: ".6rem", marginRight: "2rem", whiteSpace: "nowrap" },
+  navLink: { color: INK, textDecoration: "none", fontSize: 18, fontWeight: 600 },
+  compareBtnLg: { display: "inline-block", background: "var(--mk-card)", color: INK, textDecoration: "none", fontWeight: 700, fontSize: 16, padding: ".75rem 2.2rem", borderRadius: 6, border: "1px solid " + LINE, cursor: "pointer" },
+  navCta: { flex: "none", background: GREEN, color: "#fff", textDecoration: "none", fontWeight: 700, fontSize: 15, padding: ".6rem 1.6rem", borderRadius: 6, marginLeft: "auto", marginRight: "2rem", whiteSpace: "nowrap" },
   tableWrap: { overflowX: "auto", border: "1px solid " + LINE, borderRadius: 16, background: "var(--mk-card)" },
   table: { width: "100%", borderCollapse: "collapse", minWidth: 640 },
   thLabel: { textAlign: "left", padding: "1rem 1.2rem", borderBottom: "1px solid " + LINE, width: "38%" },
@@ -660,7 +661,7 @@ const s = {
   eyebrow: { display: "inline-block", fontSize: 13, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: GREEN, background: "#e4f3ea", border: "1px solid #cbe7d6", borderRadius: 999, padding: ".35rem .9rem" },
   h1: { fontSize: "clamp(1.9rem, 3.4vw, 2.6rem)", lineHeight: 1.22, color: "var(--mk-ink)", fontWeight: 700, letterSpacing: "-.02em", margin: ".6rem 0 0", maxWidth: 520 },
   heroSub: { fontSize: "1.14rem", margin: "1.1rem 0 1.8rem", maxWidth: 480, color: "var(--mk-body)" },
-  heroBtns: { width: "100%" },
+  heroBtns: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: ".7rem" },
   heroForm: { display: "flex", gap: ".6rem", maxWidth: 480 },
   heroInput: { flex: "1 1 auto", minWidth: 0, padding: ".85rem 1rem", fontSize: 15, borderRadius: 10, border: `1px solid ${LINE}`, background: "var(--mk-card)", color: INK },
   btnPrimary: { flex: "none", background: `linear-gradient(180deg, ${GREEN2}, ${GREEN})`, color: "#fff", border: "none", fontWeight: 700, fontSize: 15, padding: ".85rem 1.6rem", borderRadius: 10, cursor: "pointer", textDecoration: "none", whiteSpace: "nowrap", boxShadow: "0 10px 24px rgba(31,122,82,.4)" },
