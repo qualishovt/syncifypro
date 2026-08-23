@@ -13,7 +13,7 @@ import { useEffect } from "react";
 // Crisp positions it with hashed-class CSS + !important that a stylesheet can't
 // beat, so we set an inline style — the only thing that reliably wins — and
 // re-apply when Crisp re-renders the launcher (open/close resets it).
-const OFFSET_BOTTOM = "80px";
+const OFFSET_BOTTOM = "50px";
 const OFFSET_RIGHT = "30px";
 
 function placeLauncher() {
