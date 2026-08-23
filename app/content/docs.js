@@ -1,0 +1,243 @@
+/**
+ * content/docs.js — the Resources library.
+ *
+ * Plain data so the doc pages stay server-rendered and searchable. Bodies are
+ * arrays of blocks: ["p"|"h2"|"h3"|"note"|"code", value] or ["ul"|"steps", [..]].
+ * Everything here describes what the app actually does — keep it in step with
+ * the features, not ahead of them.
+ */
+
+export const DOCS = [
+  {
+    slug: "getting-started",
+    category: "Start here",
+    title: "Getting started with SyncifyPro",
+    summary: "Install the app, run your first export, and understand how files round-trip back into your store.",
+    body: [
+      ["p", "SyncifyPro turns your Shopify store into spreadsheets you can read, edit and import back. Nothing about it is a black box: what you export is what you edit, and what you edit is what gets written back."],
+      ["h2", "Install"],
+      ["steps", [
+        "Open SyncifyPro on the Shopify App Store and click Install.",
+        "Approve the permissions. The app only asks for the scopes it needs to read and write the data types you use.",
+        "You land on the app home, with an Export card and an Import drop-zone.",
+      ]],
+      ["h2", "Your first export"],
+      ["steps", [
+        "Click New export.",
+        "Tick the data types you want — start with Products.",
+        "Choose a format. Excel keeps one sheet per data type; CSV gives one file per type inside a ZIP.",
+        "Click Export. The job runs in the background and appears under Activity with a live progress bar.",
+      ]],
+      ["note", "Large stores switch to Shopify's bulk operations automatically. You don't have to choose — a 200-product export and a 200,000-product export are the same two clicks."],
+      ["h2", "Edit and import back"],
+      ["p", "Open the file in Excel, Google Sheets or any CSV editor. Change the cells you care about, leave the rest alone, and drop the file back on the Import card. Before anything is written you get a preview: how many records were found, how many are valid, and what will be created, updated or skipped."],
+      ["h2", "Where to go next"],
+      ["ul", [
+        "Exporting: filters and column control — keep files small and relevant.",
+        "Importing: the Command column — decide per row whether to create, update or delete.",
+        "Scheduling: put a job on repeat and have the file delivered to you.",
+      ]],
+    ],
+  },
+  {
+    slug: "exporting",
+    category: "Exporting",
+    title: "Exporting: filters, columns and formats",
+    summary: "Export exactly the records and columns you need, in the file format that suits the job.",
+    body: [
+      ["p", "An export has three questions: which data types, which records, and which columns. Answer them and the file is exactly as big as it needs to be."],
+      ["h2", "Which data types"],
+      ["p", "Tick as many as you like in one job. An Excel export puts each data type on its own sheet — Products, Customers, Orders and so on — so one file can carry a whole store."],
+      ["h2", "Which records — filters"],
+      ["p", "Filters run on Shopify's side, so a filtered export is genuinely smaller and faster, not just trimmed afterwards. Typical filters:"],
+      ["ul", [
+        "Product status is Active, Draft or Archived",
+        "Vendor is any of a list",
+        "Tagged with a given tag",
+        "Created or updated on or after a date",
+        "Order status, financial status or fulfilment status",
+      ]],
+      ["h2", "Which columns"],
+      ["p", "Column control keeps a file readable. Exporting 60 product columns when you only need Handle, Title and Price makes for a file nobody wants to open. Pick the columns and the export carries just those."],
+      ["h2", "Formats"],
+      ["ul", [
+        "Excel (.xlsx) — one workbook, one sheet per data type. The default, and the easiest to edit.",
+        "CSV — one file per data type, delivered as a ZIP when you pick more than one.",
+        "XML and JSON — for feeding another system rather than editing by hand.",
+        "PDF — a read-only snapshot, useful for sharing a report.",
+        "Google Sheets — export straight into Drive and edit in the browser.",
+      ]],
+      ["note", "Every export is kept under your file-retention setting and can be deleted at any time from the job page."],
+    ],
+  },
+  {
+    slug: "importing",
+    category: "Importing",
+    title: "Importing: the Command column and previews",
+    summary: "How rows are matched to existing records, and how to create, update or delete deliberately.",
+    body: [
+      ["p", "An import file is a normal spreadsheet with one extra idea: the Command column, which says what should happen to each row."],
+      ["h2", "Commands"],
+      ["ul", [
+        "MERGE — update the record if it exists, create it if it doesn't. The safe default.",
+        "NEW — always create a new record.",
+        "UPDATE — only touch records that already exist; skip anything unknown.",
+        "REPLACE — overwrite the record's child rows (variants, line items) rather than merging them.",
+        "DELETE — remove the record. Used deliberately, never by accident.",
+        "IGNORE — skip the row entirely, handy while you're testing.",
+      ]],
+      ["h2", "How rows are matched"],
+      ["p", "Products match on Handle, customers on Email, orders on Order Name. If the identifier is missing the row can only be created, never matched — which is why a MERGE import with an empty Handle column creates duplicates. The preview will tell you before that happens."],
+      ["h2", "Update only what you touched"],
+      ["p", "You do not need to import every column you exported. Delete the columns you didn't change and only the remaining fields are written. A price update can be a two-column file: Handle and Price."],
+      ["h2", "The preview"],
+      ["p", "Every import is analysed before it runs: how many rows parsed, how many are valid, and the split between create, update, delete and skip. Nothing reaches your store until you confirm."],
+      ["h2", "The results file"],
+      ["p", "When a job finishes you get a results workbook — your original rows plus what happened to each one, with the reason for any failure. Fix those rows and re-import just that file."],
+      ["note", "Test on a handful of rows first. Export 5 products, change them, import them back, and confirm the result before running the same file over 5,000."],
+    ],
+  },
+  {
+    slug: "bulk-updates",
+    category: "Importing",
+    title: "Bulk-updating products, prices and inventory",
+    summary: "The export → edit → import loop for changing thousands of records at once.",
+    body: [
+      ["p", "Bulk updates are the reason most merchants install the app. The pattern is always the same: export what you want to change, change it in a spreadsheet, import it back."],
+      ["h2", "A price change across a vendor"],
+      ["steps", [
+        "Export Products, filtered to the vendor, with just the Handle, Title and Price columns.",
+        "In the spreadsheet, add a column with your new price — for example =ROUND(C2*0.9, 2) for a 10% cut.",
+        "Paste the calculated values over the Price column as values, not formulas.",
+        "Delete the Title column — you didn't change it.",
+        "Import the file. The preview shows the number of products that will be updated.",
+      ]],
+      ["h2", "Adding a tag to a selection"],
+      ["p", "Tags are replaced, not appended, so export the current Tags column, add your new tag to the end of each cell, and import. Keeping the existing tags in the file is what preserves them."],
+      ["h2", "Inventory"],
+      ["p", "Inventory is per location. Export Inventory, edit the quantity for the location you're changing, and import. Leave other locations out of the file and they're untouched."],
+      ["note", "If a run goes wrong, the results file lists exactly which rows changed. Combined with a pre-change export, that's your undo: re-import the original file."],
+    ],
+  },
+  {
+    slug: "scheduling",
+    category: "Automation",
+    title: "Scheduling exports and imports",
+    summary: "Put a job on repeat and have the file delivered by email, FTP/SFTP, Amazon S3 or Google Drive.",
+    body: [
+      ["p", "Anything you can run once, you can schedule. A schedule keeps the same data types, filters and columns as the job you built by hand."],
+      ["h2", "Frequencies"],
+      ["ul", ["Hourly", "Daily at a chosen time", "Weekly on chosen days", "Monthly on a chosen date"]],
+      ["h2", "Delivery destinations"],
+      ["ul", [
+        "Email — the file arrives as an attachment, or as a link when it's large.",
+        "FTP / SFTP — dropped into a folder on your server.",
+        "Amazon S3 — written to a bucket with your keys.",
+        "Google Drive — saved to a folder you pick, after connecting your Google account.",
+        "Google Sheets — written as a live sheet rather than a file.",
+      ]],
+      ["h2", "Time zones"],
+      ["p", "Schedules run in the time zone set in Settings. Change it there and every schedule follows — you don't have to re-time each job."],
+      ["h2", "Watching runs"],
+      ["p", "Each run gets its own entry under Activity with its own progress, file and results workbook. A failed run doesn't stop the schedule; the next one goes ahead."],
+      ["note", "Common setup: a nightly Products export to Google Drive as a rolling backup, and a weekly Orders export to S3 for your accountant."],
+    ],
+  },
+  {
+    slug: "migrations",
+    category: "Migrating",
+    title: "Migrating another store into Shopify",
+    summary: "Pull products, customers, orders, categories and coupons from another platform — with redirects.",
+    body: [
+      ["p", "A migration reads your old store, builds a normal SyncifyPro import file, and hands it to the same import pipeline you'd use for a spreadsheet. Nothing is written to Shopify until you review the preview."],
+      ["h2", "Supported sources"],
+      ["ul", [
+        "WooCommerce — REST API key and secret from Settings → Advanced → REST API.",
+        "BigCommerce — a Store-level API account token.",
+        "Magento 2 — an integration access token.",
+        "PrestaShop — a Webservice API key (we add /api to your URL ourselves).",
+        "OpenCart — a small read-only bridge file you upload to your store root.",
+      ]],
+      ["h2", "What comes across"],
+      ["ul", ["Products with variants, images, prices and stock", "Customers with addresses", "Orders with line items and totals", "Categories, which become Shopify collections", "Coupons, which become discounts"]],
+      ["h2", "Keeping your SEO"],
+      ["p", "Old product and category URLs rarely match Shopify's. The migration generates a Redirects sheet mapping each old path to its new handle, so existing links and search rankings survive the move. Import it with everything else."],
+      ["h2", "Filters"],
+      ["p", "You don't have to take the whole store. Filter by status, date range or order state to bring across only what matters — useful when the old store has ten years of test data."],
+      ["note", "Run a small migration first: filter to a handful of products, import, and check how they look in Shopify before moving the catalog."],
+    ],
+  },
+  {
+    slug: "opencart-bridge",
+    category: "Migrating",
+    title: "Connecting OpenCart with the bridge file",
+    summary: "Why OpenCart needs a bridge file, and how to install and remove it safely.",
+    body: [
+      ["p", "OpenCart's built-in API is written for checkout, not for reading a catalog: there is no endpoint that lists products, customers or orders. Every migration tool solves this the same way — with a small file you place in your store."],
+      ["h2", "Installing the bridge"],
+      ["steps", [
+        "In SyncifyPro, open Migrations and choose OpenCart.",
+        "Click Download bridge file. The file has a private token generated for your shop.",
+        "Upload syncifypro-bridge.php to your OpenCart root folder — the one containing config.php — using FTP or your hosting file manager.",
+        "Enter your store URL and click Connect.",
+      ]],
+      ["h2", "What the bridge can do"],
+      ["p", "It is read-only. It serves products, categories, customers, orders and coupons as JSON, and it refuses any request without the exact token. It never writes to your database and never changes your store."],
+      ["h2", "Removing it"],
+      ["p", "Delete the file when your migration is done. It's a single file with no installer and no database changes, so removing it leaves nothing behind."],
+      ["note", "Tested against OpenCart 4.x. If you're on OpenCart 3, get in touch before you start and we'll check compatibility with your version."],
+    ],
+  },
+  {
+    slug: "data-and-security",
+    category: "Trust",
+    title: "How your data is handled",
+    summary: "What we store, for how long, how it's encrypted, and what happens when you uninstall.",
+    body: [
+      ["p", "The app moves store data on your behalf, so it's fair to ask exactly what happens to it."],
+      ["h2", "What is stored"],
+      ["ul", [
+        "The export and import files you generate, kept for the retention period you choose in Settings.",
+        "Job records — what ran, when, and the results — so you have a history.",
+        "Connection credentials for migration sources and delivery destinations.",
+      ]],
+      ["h2", "Encryption"],
+      ["ul", [
+        "TLS for everything in transit.",
+        "Encrypted storage at rest for generated files.",
+        "Server and platform credentials sealed with AES-256-GCM. They are used server-side and never sent back to your browser.",
+      ]],
+      ["h2", "Deletion"],
+      ["p", "Files expire on your retention setting. Any job and its files can be deleted immediately from the job page. Uninstalling the app removes your shop's data, and the mandatory Shopify privacy webhooks are implemented so deletion requests are honoured automatically."],
+      ["h2", "Protected customer data"],
+      ["p", "Customer and order fields are Protected Customer Data under Shopify's rules. They're processed only to build the file you asked for, handled per Shopify's requirements, and never used for anything else."],
+      ["note", "Full details are in the privacy policy and terms of service, linked in the footer."],
+    ],
+  },
+  {
+    slug: "troubleshooting",
+    category: "Trust",
+    title: "Troubleshooting common errors",
+    summary: "What the frequent import failures mean and how to fix the rows that caused them.",
+    body: [
+      ["p", "When an import reports failures, open the results workbook: every failed row carries the reason next to it. These are the ones people hit most."],
+      ["h3", "\"Handle has already been taken\""],
+      ["p", "You used NEW on a product that already exists. Switch the Command to MERGE, or change the handle if you really want a second product."],
+      ["h3", "\"Path has already been taken\" (redirects)"],
+      ["p", "A redirect for that path exists. Use MERGE so the existing redirect is updated instead of a duplicate being created."],
+      ["h3", "Products import without their options"],
+      ["p", "A variant row needs its option name and value columns filled in. If a product genuinely has no options, leave those columns empty on a single row and it will be created with a default variant."],
+      ["h3", "Customers are skipped"],
+      ["p", "Customers match on email. A row with no email address cannot be matched or created."],
+      ["h3", "The file is too large to open"],
+      ["p", "Re-export with filters and only the columns you need. A file of 60 columns × 200,000 rows is hard on any spreadsheet program, and rarely necessary for a change you can express in three columns."],
+      ["note", "Still stuck? Open the chat bubble in the app — the conversation carries your shop domain, so we can look at the exact job."],
+    ],
+  },
+];
+
+export const DOC_CATEGORIES = ["Start here", "Exporting", "Importing", "Automation", "Migrating", "Trust"];
+
+export function getDoc(slug) {
+  return DOCS.find((d) => d.slug === slug) ?? null;
+}

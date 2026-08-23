@@ -27,7 +27,7 @@ export const loader = async ({ request }) => {
 
 /* ── content (mirrors routes/_index) ───────────────────────────────────────── */
 
-const NAV = [["How it works", "#how"], ["Data types", "#data"], ["Migrate", "#migrate"], ["Security", "#security"]];
+const NAV = [["How it works", "#how"], ["Data types", "#data"], ["Migrate", "#migrate"], ["Resources", "/resources"], ["Blog", "/blog"]];
 
 const SI = { viewBox: "0 0 24 24", width: 24, height: 24, fill: "none", stroke: "currentColor", strokeWidth: 1.9, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true };
 const STAT_ICONS = {
@@ -331,6 +331,7 @@ export default function NewMarketing() {
         </div>
         <div style={s.footCols} className="nf-footcols">
           <div><p style={s.footHead}>Product</p><a href="#features" style={s.footLink}>Features</a><a href="#data" style={s.footLink}>Data types</a><a href="#migrate" style={s.footLink}>Migrate</a></div>
+          <div><p style={s.footHead}>Resources</p><a href="/resources" style={s.footLink}>Guides</a><a href="/blog" style={s.footLink}>Blog</a><a href="#faq" style={s.footLink}>FAQ</a></div>
           <div><p style={s.footHead}>Company</p><a href="mailto:support@syncifypro.app" style={s.footLink}>Contact us</a><a href="/privacy" style={s.footLink}>Privacy Policy</a><a href="/terms" style={s.footLink}>Terms of Service</a></div>
         </div>
         <p style={s.footCopy}>© SyncifyPro · Operated by IntelliShop</p>
@@ -731,7 +732,7 @@ const s = {
 
   footer: { borderTop: `1px solid ${LINE}`, padding: "2.5rem 2rem", display: "grid", gridTemplateColumns: "1fr auto", gap: "1.5rem", maxWidth: 1160, margin: "0 auto", alignItems: "start" },
   footBrand: { display: "inline-flex", alignItems: "center", gap: 10 },
-  footCols: { display: "grid", gridTemplateColumns: "repeat(2,auto)", gap: "3rem" },
+  footCols: { display: "grid", gridTemplateColumns: "repeat(3,auto)", gap: "2.4rem" },
   footHead: { fontSize: 13, fontWeight: 700, color: INK, margin: "0 0 .6rem" },
   footLink: { display: "block", color: BODY, textDecoration: "none", fontSize: 14, padding: ".2rem 0" },
   footCopy: { gridColumn: "1 / -1", fontSize: 13, color: "var(--mk-muted)", margin: ".5rem 0 0" },
