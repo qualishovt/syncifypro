@@ -530,8 +530,9 @@ const CSS = `
 .nf-faq summary::-webkit-details-marker { display:none; }
 .nf-slide { animation: nfFade .4s ease; }
 @keyframes nfFade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-.nf-dots button { width: 7px; height: 7px; border-radius: 999px; border: 0; padding: 0; background: var(--mk-line); cursor: pointer; transition: width .2s ease, background .2s ease; }
-.nf-dots button[aria-current="true"] { width: 18px; background: var(--mk-green); }
+.nf-dots button { width: 8px; height: 8px; border-radius: 999px; border: 0; padding: 0; background: var(--mk-muted); cursor: pointer; transition: width .2s ease, background .2s ease; }
+.nf-dots button:hover { background: var(--mk-ink); }
+.nf-dots button[aria-current="true"] { width: 20px; background: var(--mk-green); }
 @media (prefers-reduced-motion: reduce) { .nf-slide { animation: none; } }
 .nf-faq[open] .nf-faqplus { transform: rotate(45deg); }
 .nf-fcard { transition: transform .18s ease, box-shadow .18s ease; }
@@ -583,7 +584,7 @@ const s = {
   heroCol: { display: "flex", flexDirection: "column", alignItems: "flex-start" },
   eyebrow: { display: "inline-block", fontSize: 13, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: GREEN, background: "#e4f3ea", border: "1px solid #cbe7d6", borderRadius: 999, padding: ".35rem .9rem" },
   h1: { fontSize: "clamp(1.9rem, 3.4vw, 2.6rem)", lineHeight: 1.22, color: "var(--mk-ink)", fontWeight: 700, letterSpacing: "-.02em", margin: ".6rem 0 0", maxWidth: 520 },
-  heroSub: { fontSize: "1.02rem", margin: "1.1rem 0 1.8rem", maxWidth: 460, color: "var(--mk-body)" },
+  heroSub: { fontSize: "1.14rem", margin: "1.1rem 0 1.8rem", maxWidth: 480, color: "var(--mk-body)" },
   heroBtns: { width: "100%" },
   heroForm: { display: "flex", gap: ".6rem", maxWidth: 480 },
   heroInput: { flex: "1 1 auto", minWidth: 0, padding: ".85rem 1rem", fontSize: 15, borderRadius: 10, border: `1px solid ${LINE}`, background: "var(--mk-card)", color: INK },
