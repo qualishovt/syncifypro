@@ -356,13 +356,13 @@ function AppMock() {
 /** Device / Light / Dark switch; the choice lives in localStorage and THEME_BOOT applies it. */
 const THEME_KEY = "sp-theme";
 const THEME_OPTIONS = [
-  ["device", "Use device theme", <svg key="d" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /></svg>],
   ["light", "Light theme", <svg key="l" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></svg>],
   ["dark", "Dark theme", <svg key="k" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" /></svg>],
+  ["device", "Use device theme", <svg key="d" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /></svg>],
 ];
 function ThemeToggle() {
-  const [pref, setPref] = useState("device");
-  useEffect(() => { setPref(window.localStorage.getItem(THEME_KEY) || "device"); }, []);
+  const [pref, setPref] = useState("light");
+  useEffect(() => { setPref(window.localStorage.getItem(THEME_KEY) || "light"); }, []);
   const choose = (p) => {
     setPref(p);
     window.localStorage.setItem(THEME_KEY, p);
@@ -463,7 +463,7 @@ const THEME_CSS = `
 .mk-theme button[aria-pressed="true"] { background: var(--mk-bg); color: var(--mk-ink); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
 .mk-theme svg { width: 15px; height: 15px; }
 `;
-const THEME_BOOT = `(function(){var k="sp-theme",m=matchMedia("(prefers-color-scheme: dark)");function a(){var p=localStorage.getItem(k)||"device";var d=p==="dark"||(p==="device"&&m.matches);document.documentElement.setAttribute("data-theme",d?"dark":"light");}window.__applyTheme=a;a();m.addEventListener("change",a);})();`;
+const THEME_BOOT = `(function(){var k="sp-theme",m=matchMedia("(prefers-color-scheme: dark)");function a(){var p=localStorage.getItem(k)||"light";var d=p==="dark"||(p==="device"&&m.matches);document.documentElement.setAttribute("data-theme",d?"dark":"light");}window.__applyTheme=a;a();m.addEventListener("change",a);})();`;
 
 const RESPONSIVE_CSS = `
 @media (max-width: 900px) {
