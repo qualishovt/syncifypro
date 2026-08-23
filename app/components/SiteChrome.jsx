@@ -163,7 +163,7 @@ export const c = {
   brandName: { fontSize: 20, fontWeight: 700, color: INK, letterSpacing: "-.01em" },
   nav: { display: "flex", gap: "2rem", flexWrap: "wrap", flex: 1, justifyContent: "center", padding: ".5rem 0" },
   navLink: { color: INK, textDecoration: "none", fontSize: 17, fontWeight: 600 },
-  install: { flex: "none", background: GREEN, color: "#fff", textDecoration: "none", fontWeight: 700, fontSize: 15, padding: ".6rem 1.6rem", borderRadius: 6, marginLeft: "auto", marginRight: "2rem", whiteSpace: "nowrap" },
+  install: { flex: "none", background: GREEN, color: "#fff", textDecoration: "none", fontWeight: 700, fontSize: 16, padding: ".6rem 1.6rem", borderRadius: 6, marginLeft: "auto", marginRight: "2rem", whiteSpace: "nowrap" },
 
   wrap: { maxWidth: 1080, margin: "0 auto", padding: "3.5rem 2rem 4.5rem" },
   narrow: { maxWidth: 760, margin: "0 auto", padding: "3rem 2rem 4.5rem" },

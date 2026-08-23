@@ -634,7 +634,7 @@ const s = {
   nav: { display: "flex", gap: "2.2rem", flexWrap: "wrap", flex: 1, justifyContent: "center", padding: ".5rem 0" },
   navLink: { color: INK, textDecoration: "none", fontSize: 18, fontWeight: 600 },
   compareBtnLg: { display: "inline-block", background: "var(--mk-card)", color: GREEN, textDecoration: "none", fontWeight: 700, fontSize: 16, padding: ".75rem 2.2rem", borderRadius: 6, border: "1px solid " + GREEN, cursor: "pointer" },
-  navCta: { flex: "none", background: GREEN, color: "#fff", textDecoration: "none", fontWeight: 700, fontSize: 15, padding: ".6rem 1.6rem", borderRadius: 6, marginLeft: "auto", marginRight: "2rem", whiteSpace: "nowrap" },
+  navCta: { flex: "none", background: GREEN, color: "#fff", textDecoration: "none", fontWeight: 700, fontSize: 16, padding: ".6rem 1.6rem", borderRadius: 6, marginLeft: "auto", marginRight: "2rem", whiteSpace: "nowrap" },
   tableWrap: { maxWidth: 1040, margin: "0 auto", overflowX: "auto", border: "1px solid " + LINE, borderRadius: 18, background: "var(--mk-card)", boxShadow: "0 14px 34px rgba(13,32,25,.07)" },
   table: { width: "100%", borderCollapse: "collapse", minWidth: 640 },
   thLabel: { textAlign: "left", padding: "1rem 1.2rem", borderBottom: "1px solid " + LINE, width: "38%" },
