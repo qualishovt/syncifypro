@@ -633,7 +633,7 @@ const s = {
   brandName: { fontSize: 20, fontWeight: 700, color: INK, letterSpacing: "-.01em" },
   nav: { display: "flex", gap: "2.2rem", flexWrap: "wrap", flex: 1, justifyContent: "center", padding: ".5rem 0" },
   navLink: { color: INK, textDecoration: "none", fontSize: 18, fontWeight: 600 },
-  compareBtnLg: { display: "inline-block", background: "var(--mk-card)", color: INK, textDecoration: "none", fontWeight: 700, fontSize: 16, padding: ".75rem 2.2rem", borderRadius: 6, border: "1px solid " + LINE, cursor: "pointer" },
+  compareBtnLg: { display: "inline-block", background: "var(--mk-card)", color: GREEN, textDecoration: "none", fontWeight: 700, fontSize: 16, padding: ".75rem 2.2rem", borderRadius: 6, border: "1px solid " + GREEN, cursor: "pointer" },
   navCta: { flex: "none", background: GREEN, color: "#fff", textDecoration: "none", fontWeight: 700, fontSize: 15, padding: ".6rem 1.6rem", borderRadius: 6, marginLeft: "auto", marginRight: "2rem", whiteSpace: "nowrap" },
   tableWrap: { overflowX: "auto", border: "1px solid " + LINE, borderRadius: 16, background: "var(--mk-card)" },
   table: { width: "100%", borderCollapse: "collapse", minWidth: 640 },
