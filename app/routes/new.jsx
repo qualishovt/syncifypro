@@ -29,6 +29,14 @@ export const loader = async ({ request }) => {
 
 const NAV = [["How it works", "#how"], ["Data types", "#data"], ["Migrate", "#migrate"], ["Security", "#security"]];
 
+const SI = { viewBox: "0 0 24 24", width: 20, height: 20, fill: "none", stroke: "currentColor", strokeWidth: 1.9, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true };
+const STAT_ICONS = {
+  grid: <svg {...SI}><rect x="3" y="3" width="7.5" height="7.5" rx="1.6" /><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.6" /><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.6" /><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.6" /></svg>,
+  globe: <svg {...SI}><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c2.6 2.8 2.6 15.2 0 18M12 3c-2.6 2.8-2.6 15.2 0 18" /></svg>,
+  send: <svg {...SI}><path d="M21.5 3.5 2.8 10.1l7 2.6 2.6 7 9.1-16.2Z" /><path d="m9.8 12.7 11.7-9.2" /></svg>,
+  clock: <svg {...SI}><circle cx="12" cy="12" r="9" /><path d="M12 7v5.3l3.4 2" /></svg>,
+};
+
 const STATS = [
   ["grid", "32 data types", "Products, orders, customers & more"],
   ["globe", "6 source platforms", "WooCommerce, Magento, PrestaShop…"],
@@ -46,8 +54,6 @@ const GLYPH = {
   box: "M12 2 3 6.5v11L12 22l9-4.5v-11L12 2Zm0 2.3 6.2 3.1L12 10.5 5.8 7.4 12 4.3Z",
   link: "M10 13a5 5 0 0 0 7 0l3-3a5 5 0 1 0-7-7l-1.5 1.5M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 1 0 7 7l1.5-1.5",
   grid: "M3 3h8v8H3V3Zm10 0h8v8h-8V3ZM3 13h8v8H3v-8Zm10 0h8v8h-8v-8Z",
-  clock: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm1 5h-2v6.4l5 3 1-1.7-4-2.4V7Z",
-  send: "M2 21l21-9L2 3v7l15 2-15 2v7Z",
   globe: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 2c1.7 0 3.4 3 3.4 8s-1.7 8-3.4 8-3.4-3-3.4-8S10.3 4 12 4ZM3 12h18",
 };
 const DATA_TYPES = [
@@ -167,7 +173,7 @@ export default function NewMarketing() {
             {STATS.map(([g, value, caption]) => (
               <div key={value} style={s.statItem}>
                 <span style={s.statIcon}>
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d={GLYPH[g]} /></svg>
+                  {STAT_ICONS[g]}
                 </span>
                 <span>
                   <span style={s.statNum}>{value}</span>
