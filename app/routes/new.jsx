@@ -29,7 +29,7 @@ export const loader = async ({ request }) => {
 
 const NAV = [["How it works", "#how"], ["Data types", "#data"], ["Migrate", "#migrate"], ["Security", "#security"]];
 
-const SI = { viewBox: "0 0 24 24", width: 20, height: 20, fill: "none", stroke: "currentColor", strokeWidth: 1.9, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true };
+const SI = { viewBox: "0 0 24 24", width: 24, height: 24, fill: "none", stroke: "currentColor", strokeWidth: 1.9, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true };
 const STAT_ICONS = {
   grid: <svg {...SI}><rect x="3" y="3" width="7.5" height="7.5" rx="1.6" /><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.6" /><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.6" /><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.6" /></svg>,
   globe: <svg {...SI}><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c2.6 2.8 2.6 15.2 0 18M12 3c-2.6 2.8-2.6 15.2 0 18" /></svg>,
@@ -667,7 +667,7 @@ const s = {
 
   statRow: { maxWidth: 1200, margin: "0 auto", padding: "0 2rem", display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "1.6rem 2.6rem" },
   statItem: { display: "inline-flex", alignItems: "center", gap: ".7rem" },
-  statIcon: { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 40, height: 40, borderRadius: 11, background: "var(--mk-green-soft)", color: "var(--mk-green-ink)", flex: "none" },
+  statIcon: { display: "inline-flex", alignItems: "center", justifyContent: "center", color: "var(--mk-green)", flex: "none" },
   statNum: { display: "block", fontFamily: HEAD, fontSize: "1.12rem", fontWeight: 700, color: INK, lineHeight: 1.25 },
   statLabel: { display: "block", fontSize: 13, color: "var(--mk-muted)" },
 
