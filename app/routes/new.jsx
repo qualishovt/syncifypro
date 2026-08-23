@@ -30,10 +30,10 @@ export const loader = async ({ request }) => {
 const NAV = [["How it works", "#how"], ["Data types", "#data"], ["Migrate", "#migrate"], ["Security", "#security"]];
 
 const STATS = [
-  ["32", "data types"],
-  ["6", "source platforms"],
-  ["5", "delivery destinations"],
-  ["1-click", "scheduled runs"],
+  ["grid", "32 data types", "Products, orders, customers & more"],
+  ["globe", "6 source platforms", "WooCommerce, Magento, PrestaShop…"],
+  ["send", "5 delivery destinations", "Email, FTP/SFTP, S3, Google Drive"],
+  ["clock", "1-click scheduling", "Hourly to monthly, on autopilot"],
 ];
 
 const FORMATS = ["Excel (.xlsx)", "CSV", "Google Sheets", "FTP / SFTP", "Amazon S3", "Google Drive", "Email"];
@@ -46,6 +46,8 @@ const GLYPH = {
   box: "M12 2 3 6.5v11L12 22l9-4.5v-11L12 2Zm0 2.3 6.2 3.1L12 10.5 5.8 7.4 12 4.3Z",
   link: "M10 13a5 5 0 0 0 7 0l3-3a5 5 0 1 0-7-7l-1.5 1.5M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 1 0 7 7l1.5-1.5",
   grid: "M3 3h8v8H3V3Zm10 0h8v8h-8V3ZM3 13h8v8H3v-8Zm10 0h8v8h-8v-8Z",
+  clock: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm1 5h-2v6.4l5 3 1-1.7-4-2.4V7Z",
+  send: "M2 21l21-9L2 3v7l15 2-15 2v7Z",
   globe: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 2c1.7 0 3.4 3 3.4 8s-1.7 8-3.4 8-3.4-3-3.4-8S10.3 4 12 4ZM3 12h18",
 };
 const DATA_TYPES = [
@@ -161,11 +163,16 @@ export default function NewMarketing() {
 
         {/* stat band */}
         <section style={s.statSection}>
-          <div style={s.statBand} className="nf-stats">
-            {STATS.map(([n, l]) => (
-              <div key={l} style={s.stat}>
-                <div style={s.statNum}>{n}</div>
-                <div style={s.statLabel}>{l}</div>
+          <div style={s.statRow} className="nf-stats">
+            {STATS.map(([g, value, caption]) => (
+              <div key={value} style={s.statItem}>
+                <span style={s.statIcon}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d={GLYPH[g]} /></svg>
+                </span>
+                <span>
+                  <span style={s.statNum}>{value}</span>
+                  <span style={s.statLabel}>{caption}</span>
+                </span>
               </div>
             ))}
           </div>
@@ -617,7 +624,7 @@ const s = {
   brand: { display: "inline-flex", alignItems: "center", gap: 10, textDecoration: "none", flex: "none", padding: "1rem 0 1rem 2rem" },
   brandName: { fontSize: 20, fontWeight: 700, color: INK, letterSpacing: "-.01em" },
   nav: { display: "flex", gap: "2.2rem", flexWrap: "wrap", flex: 1, justifyContent: "center", padding: ".5rem 0" },
-  navLink: { color: INK, textDecoration: "none", fontSize: 17, fontWeight: 600 },
+  navLink: { color: INK, textDecoration: "none", fontSize: 19, fontWeight: 600 },
   navGhost: { flex: "none", background: "transparent", color: INK, textDecoration: "none", fontWeight: 700, fontSize: 15, padding: ".55rem 1.2rem", borderRadius: 6, border: "1px solid " + LINE, marginLeft: "auto", whiteSpace: "nowrap" },
   navCta: { flex: "none", background: GREEN, color: "#fff", textDecoration: "none", fontWeight: 700, fontSize: 15, padding: ".6rem 1.6rem", borderRadius: 6, marginLeft: ".6rem", marginRight: "2rem", whiteSpace: "nowrap" },
   tableWrap: { overflowX: "auto", border: "1px solid " + LINE, borderRadius: 16, background: "var(--mk-card)" },
@@ -652,10 +659,11 @@ const s = {
   stars: { color: AMBER, letterSpacing: "2px", fontSize: 15 },
   proofText: { fontSize: 13.5, color: "var(--mk-muted)" },
 
-  statBand: { position: "relative", width: "92%", maxWidth: 880, margin: "0 auto", display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: "1px", background: LINE, border: `1px solid ${LINE}`, borderRadius: 14, overflow: "hidden" },
-  stat: { background: "var(--mk-card)", padding: "1rem .75rem", textAlign: "center" },
-  statNum: { fontFamily: HEAD, fontSize: "1.6rem", fontWeight: 700, color: INK },
-  statLabel: { fontSize: 12.5, color: "var(--mk-muted)", marginTop: 2 },
+  statRow: { maxWidth: 1200, margin: "0 auto", padding: "0 2rem", display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "1.6rem 2.6rem" },
+  statItem: { display: "inline-flex", alignItems: "center", gap: ".7rem" },
+  statIcon: { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 40, height: 40, borderRadius: 11, background: "var(--mk-green-soft)", color: "var(--mk-green-ink)", flex: "none" },
+  statNum: { display: "block", fontFamily: HEAD, fontSize: "1.12rem", fontWeight: 700, color: INK, lineHeight: 1.25 },
+  statLabel: { display: "block", fontSize: 13, color: "var(--mk-muted)" },
 
   strip: { maxWidth: 1160, margin: "0 auto", padding: "3.5rem 2rem 1rem", textAlign: "center" },
   stripLabel: { fontSize: 12.5, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mk-muted)", margin: "0 0 1rem" },
