@@ -675,9 +675,9 @@ const s = {
   statLabel: { display: "block", fontSize: 13, color: "var(--mk-muted)" },
 
   strip: { maxWidth: 1160, margin: "0 auto", padding: "3.5rem 2rem 1rem", textAlign: "center" },
-  stripLabel: { fontSize: 12.5, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mk-muted)", margin: "0 0 1rem" },
+  stripLabel: { fontSize: 14, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mk-muted)", margin: "0 0 1rem" },
   stripRow: { display: "flex", flexWrap: "wrap", gap: ".6rem", justifyContent: "center" },
-  formatPill: { fontSize: 14, fontWeight: 600, color: INK, background: MINT, border: `1px solid ${LINE}`, borderRadius: 999, padding: ".45rem 1rem" },
+  formatPill: { fontSize: 16, fontWeight: 600, color: INK, background: MINT, border: `1px solid ${LINE}`, borderRadius: 999, padding: ".55rem 1.2rem" },
 
   section: { maxWidth: 1160, margin: "0 auto", padding: "4.5rem 2rem" },
   sectionSoft: { maxWidth: "none", background: "var(--mk-shade)", margin: 0 },
