@@ -138,7 +138,7 @@ export default function NewMarketing() {
 
       <header style={s.header} className="nf-header">
         <a href="/" style={s.brand} className="nf-brand">
-          <img src="/brand/syncifypro-icon-rounded.svg" alt="" width="34" height="34" style={{ display: "block", borderRadius: 8 }} />
+          <img src="/brand/syncifypro-icon.svg" alt="" width="34" height="34" style={{ display: "block" }} />
           <span style={s.brandName}>SyncifyPro</span>
         </a>
         <nav style={s.nav} className="nf-nav">
@@ -329,7 +329,7 @@ export default function NewMarketing() {
 
       <footer style={s.footer} className="nf-footer">
         <div style={s.footBrand}>
-          <img src="/brand/syncifypro-icon-rounded.svg" alt="" width="30" height="30" style={{ borderRadius: 8 }} />
+          <img src="/brand/syncifypro-icon.svg" alt="" width="30" height="30" style={{ display: "block" }} />
           <span style={s.brandName}>SyncifyPro</span>
         </div>
         <div style={s.footCols} className="nf-footcols">
