@@ -165,7 +165,7 @@ function MarketingPage({ showForm }) {
       <script dangerouslySetInnerHTML={{ __html: THEME_BOOT }} />
       <header style={mk.header} className="mk-header">
         <a href="/" style={mk.brandLink} className="mk-brand">
-          <img src="/brand/syncifypro-icon-rounded.svg" alt="" width="34" height="34" style={mk.logoImg} />
+          <img src="/brand/syncifypro-icon.svg" alt="" width="34" height="34" style={mk.logoImg} />
           <span style={mk.brandName}>SyncifyPro</span>
         </a>
         <nav style={mk.nav} className="mk-nav">
@@ -304,7 +304,7 @@ function MarketingPage({ showForm }) {
         </div>
         <div style={mk.footerBar}>
           <span style={mk.footerBrand}>
-            <img src="/brand/syncifypro-icon-rounded.svg" alt="" width="22" height="22" style={mk.footerIcon} />
+            <img src="/brand/syncifypro-icon.svg" alt="" width="22" height="22" style={mk.footerIcon} />
             SyncifyPro
           </span>
           <span>© {new Date().getFullYear()} SyncifyPro · Operated by IntelliShop</span>
@@ -540,7 +540,7 @@ const mk = {
     display: "inline-flex", alignItems: "center", gap: 10, flex: "none",
     textDecoration: "none", padding: "1rem 0 1rem 2rem",
   },
-  logoImg: { display: "block", borderRadius: 8 },
+  logoImg: { display: "block" },
   brandName: { fontSize: 20, fontWeight: 700, color: INK, letterSpacing: "-.01em" },
   nav: { display: "flex", gap: "2.2rem", flexWrap: "wrap", flex: 1, justifyContent: "center", padding: ".5rem 0" },
   navLink: { color: INK, textDecoration: "none", fontSize: 15.5, fontWeight: 600 },
@@ -639,7 +639,7 @@ const mk = {
     flexWrap: "wrap", fontSize: 14, color: "var(--mk-muted)",
   },
   footerBrand: { display: "inline-flex", alignItems: "center", gap: 8, color: INK, fontWeight: 700 },
-  footerIcon: { display: "block", borderRadius: 6 },
+  footerIcon: { display: "block" },
 };
 
 const mock = {
