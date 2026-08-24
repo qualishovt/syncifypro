@@ -1,4 +1,18 @@
-import { Links, Meta, Outlet, Scripts, ScrollRestoration } from "react-router";
+import { Links, Meta, Outlet, redirect, Scripts, ScrollRestoration } from "react-router";
+
+// www is an alias, not a home: 301 every www request to the apex so the site
+// has exactly one canonical URL per page.
+export const loader = ({ request }) => {
+  const url = new URL(request.url);
+  const host = (request.headers.get("host") || url.host || "").toLowerCase();
+  if (host.startsWith("www.")) {
+    url.host = host.slice(4);
+    url.protocol = "https:";
+    url.port = "";
+    throw redirect(url.toString(), 301);
+  }
+  return null;
+};
 
 export default function App() {
   return (
