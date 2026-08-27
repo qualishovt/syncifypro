@@ -141,8 +141,8 @@ export async function action({ request }) {
     const enablesToggle = intent === "toggle" && fd.get("enabled") === "true";
     if (["run", "save"].includes(intent) || enablesToggle) {
       const { getPlan, upgradeError } = await import("../billing.server.js");
-      const { pro } = await getPlan(admin);
-      if (!pro) return data(upgradeError("Scheduling", session.shop), { status: 402 });
+      const plan = await getPlan(admin);
+      if (!plan.schedules) return data(upgradeError("Scheduling", session.shop), { status: 402 });
     }
     if (intent === "delete") {
       await sched.deleteSchedule(shop, String(fd.get("id")));

@@ -594,8 +594,8 @@ function serializePreset(p) {
 
 export async function action({ request }) {
   const { admin, session } = await authenticate.admin(request);
-  const { getPlan, upgradeError, FREE_ROW_LIMIT } = await import("../billing.server.js");
-  const { pro } = await getPlan(admin);
+  const { getPlan, upgradeError } = await import("../billing.server.js");
+  const plan = await getPlan(admin);
 
   const formData = await request.formData();
   const format = formData.get("format") ?? "csv";
@@ -621,7 +621,7 @@ export async function action({ request }) {
   // WITHOUT running an export now. First run at the given wall-clock time in
   // the shop's display timezone; repeats per the optional interval.
   if (intent === "createInlineSchedule") {
-    if (!pro) return data(upgradeError("Scheduling", session.shop), { status: 402 });
+    if (!plan.schedules) return data(upgradeError("Scheduling", session.shop), { status: 402 });
     try {
       const payload = JSON.parse(String(formData.get("payload") || "{}"));
       let specs = Array.isArray(payload.specs) ? payload.specs : [];
@@ -718,9 +718,9 @@ export async function action({ request }) {
       deliverTarget: String(formData.get("advDeliverTarget") ?? "").trim() || null,
       emailTo:       String(formData.get("advEmailTo") ?? "").trim() || null,
     };
-    // Free plan: the export file is capped; the cap rides in options so the
-    // worker enforces it wherever the job actually runs.
-    const cappedOptions = pro ? options : { ...options, maxRows: FREE_ROW_LIMIT };
+    // Per-plan row cap; it rides in options so the worker enforces it wherever
+    // the job actually runs. null rowLimit (Enterprise) means uncapped.
+    const cappedOptions = plan.rowLimit ? { ...options, maxRows: plan.rowLimit } : options;
     return await startExport({ admin, shop: session.shop, specs, format, splitRows, options: cappedOptions });
   } catch (err) {
     return data({ error: err.message }, { status: 500 });

@@ -5,17 +5,27 @@
  * the Partner dashboard — the app only READS the merchant's active
  * subscription and limits features accordingly:
  *
- *   Free — imports and exports capped at FREE_ROW_LIMIT rows; no schedules,
- *          no migrations.
- *   Pro  — everything, uncapped.
+ *   Basic       — free; imports/exports capped at 100 rows; no schedules or migrations.
+ *   Pro   $12   — 10,000 rows per job; schedules + migrations.
+ *   Max   $40   — 100,000 rows per job; schedules + migrations.
+ *   Enterprise $150 — unlimited; schedules + migrations.
  *
- * Any ACTIVE app subscription counts as Pro (there is only one paid plan;
- * checking by name would break the moment the plan is renamed in the
- * dashboard). Test charges count too, so development stores behave like Pro
- * once the test plan is accepted.
+ * Tiers are matched by subscription NAME (case-insensitive), so the plan names
+ * in the Partner dashboard must stay exactly Basic / Pro / Max / Enterprise.
+ * An active subscription whose name we don't recognize gets full access —
+ * over-delivering to a paying merchant beats capping one because a plan was
+ * renamed. No subscription at all (or a billing API error) means Basic.
  */
 
-export const FREE_ROW_LIMIT = 50;
+// rowLimit: max rows per import/export job; null = unlimited.
+const TIERS = {
+  basic:      { planName: "Basic",      paid: false, rowLimit: 100,     schedules: false, migrations: false },
+  pro:        { planName: "Pro",        paid: true,  rowLimit: 10_000,  schedules: true,  migrations: true },
+  max:        { planName: "Max",        paid: true,  rowLimit: 100_000, schedules: true,  migrations: true },
+  enterprise: { planName: "Enterprise", paid: true,  rowLimit: null,    schedules: true,  migrations: true },
+};
+
+export const FREE_ROW_LIMIT = TIERS.basic.rowLimit;
 
 const PLAN_QUERY = `#graphql
   query appActiveSubscriptions {
@@ -24,17 +34,20 @@ const PLAN_QUERY = `#graphql
     }
   }`;
 
-/** The merchant's plan, from the live subscription state. Fails closed to Free. */
+/** The merchant's plan, from the live subscription state. Fails closed to Basic. */
 export async function getPlan(admin) {
   try {
     const res = await admin.graphql(PLAN_QUERY);
     const body = await res.json();
     const subs = body?.data?.currentAppInstallation?.activeSubscriptions ?? [];
     const active = subs.find((s) => s.status === "ACTIVE");
-    return { pro: Boolean(active), planName: active?.name ?? "Free" };
+    if (!active) return { ...TIERS.basic };
+    const tier = TIERS[String(active.name).trim().toLowerCase()];
+    if (tier) return { ...tier };
+    return { ...TIERS.enterprise, planName: active.name };
   } catch {
-    // Billing must never take the app down; an API hiccup means Free limits.
-    return { pro: false, planName: "Free" };
+    // Billing must never take the app down; an API hiccup means Basic limits.
+    return { ...TIERS.basic };
   }
 }
 
@@ -49,7 +62,7 @@ export function planPageUrl(shop) {
 /** Uniform upgrade-required error payload for route actions. */
 export function upgradeError(feature, shop) {
   return {
-    error: `${feature} is available on the Pro plan ($15/month). Open Settings → Plan to upgrade.`,
+    error: `${feature} is available on paid plans (from $12/month). Open Settings → Plan to upgrade.`,
     upgradeUrl: planPageUrl(shop),
     upgradeRequired: true,
   };

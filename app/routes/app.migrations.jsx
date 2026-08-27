@@ -57,8 +57,8 @@ export async function action({ request }) {
   // Migrations are a Pro feature (disconnects stay available for cleanup).
   if (["etsyConnect", "connect", "migrate", "validate"].includes(intent) || !intent) {
     const { getPlan, upgradeError } = await import("../billing.server.js");
-    const { pro } = await getPlan(admin);
-    if (!pro) return data(upgradeError("Migrations", session.shop), { status: 402 });
+    const plan = await getPlan(admin);
+    if (!plan.migrations) return data(upgradeError("Migrations", session.shop), { status: 402 });
   }
 
   // ── Etsy OAuth: start the handshake / disconnect ────────────────────────────

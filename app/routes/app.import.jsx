@@ -281,8 +281,8 @@ export async function action({ request }) {
   if (intent === "createInlineImportSchedule") {
     {
       const { getPlan, upgradeError } = await import("../billing.server.js");
-      const { pro } = await getPlan(admin);
-      if (!pro) return data(upgradeError("Scheduling", session.shop), { status: 402 });
+      const plan = await getPlan(admin);
+      if (!plan.schedules) return data(upgradeError("Scheduling", session.shop), { status: 402 });
     }
     try {
       const payload = JSON.parse(String(formData.get("payload") || "{}"));
@@ -377,13 +377,13 @@ export async function action({ request }) {
       return data({ error: "Nothing importable — no sheets selected or all rows invalid." }, { status: 400 });
     }
 
-    // Free plan: imports over the row cap are blocked (blocking beats silently
+    // Imports over the plan row cap are blocked (blocking beats silently
     // importing half a file — an import must be all-or-nothing per file).
     {
-      const { getPlan, upgradeError, FREE_ROW_LIMIT } = await import("../billing.server.js");
-      const { pro } = await getPlan(admin);
-      if (!pro && totals.importable > FREE_ROW_LIMIT) {
-        const e = upgradeError(`Importing more than ${FREE_ROW_LIMIT} rows (this file has ${totals.importable})`, session.shop);
+      const { getPlan, upgradeError } = await import("../billing.server.js");
+      const plan = await getPlan(admin);
+      if (plan.rowLimit && totals.importable > plan.rowLimit) {
+        const e = upgradeError(`Importing more than ${plan.rowLimit.toLocaleString("en-US")} rows on the ${plan.planName} plan (this file has ${totals.importable.toLocaleString("en-US")})`, session.shop);
         return data(e, { status: 402 });
       }
     }

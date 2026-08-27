@@ -497,30 +497,38 @@ function ScopesCard({ scopes }) {
   );
 }
 
+const PLAN_TIERS = [
+  { name: "Basic",      price: "Free",      rows: "100 rows per job",     extras: "—" },
+  { name: "Pro",        price: "$12/month",  rows: "10,000 rows per job",  extras: "Schedules + migrations" },
+  { name: "Max",        price: "$40/month",  rows: "100,000 rows per job", extras: "Schedules + migrations" },
+  { name: "Enterprise", price: "$150/month", rows: "Unlimited rows",       extras: "Schedules + migrations + priority support" },
+];
+
 function PlanCard({ plan }) {
-  const pro = Boolean(plan?.pro);
+  const paid = Boolean(plan?.paid);
   const openPlans = () => window.open(plan.url, "_top");
 
   return (
     <Card heading="Plan" description="Your subscription. Billing is handled by Shopify.">
       <s-stack direction="block" gap="small-200">
         <s-text>
-          Current plan: <s-text type="strong">{pro ? plan.planName : "Free"}</s-text>
+          Current plan: <s-text type="strong">{plan?.planName ?? "Basic"}</s-text>
         </s-text>
-        {pro ? (
-          <s-text color="subdued">
-            Unlimited rows per import and export, plus scheduling and migrations. Thanks for supporting SyncifyPro!
-          </s-text>
-        ) : (
-          <s-text color="subdued">
-            The Free plan includes imports and exports of up to 50 rows. Upgrade to Pro ($15/month)
-            for unlimited rows, scheduled jobs and platform migrations.
-          </s-text>
-        )}
+        {PLAN_TIERS.map((t) => {
+          const current = t.name === plan?.planName;
+          return (
+            <div key={t.name} style={{ ...planRow, ...(current ? planRowActive : null) }}>
+              <s-text type={current ? "strong" : undefined}>{t.name}</s-text>
+              <s-text color="subdued">{t.price}</s-text>
+              <s-text color="subdued">{t.rows}</s-text>
+              <s-text color="subdued">{t.extras}</s-text>
+            </div>
+          );
+        })}
       </s-stack>
       <s-divider />
       <s-stack direction="inline" gap="small" alignItems="center">
-        <s-button variant="primary" onClick={openPlans}>{pro ? "Manage plan" : "Upgrade to Pro"}</s-button>
+        <s-button variant="primary" onClick={openPlans}>{paid ? "Manage plan" : "Upgrade"}</s-button>
         <s-text color="subdued">Opens the Shopify plan page.</s-text>
       </s-stack>
     </Card>
@@ -545,6 +553,12 @@ function AboutCard({ appInfo }) {
 /* eslint-enable react/prop-types */
 
 // ─── styles ──────────────────────────────────────────────────────────────────
+
+const planRow = {
+  display: "grid", gridTemplateColumns: "110px 100px 170px 1fr", gap: ".5rem",
+  padding: ".45rem .6rem", borderRadius: 8, alignItems: "center",
+};
+const planRowActive = { background: "#eefaf8", border: "1px solid #0d9488" };
 
 const layout = {
   display: "grid", gridTemplateColumns: "minmax(160px, 220px) 1fr", gap: "1rem", alignItems: "start",
