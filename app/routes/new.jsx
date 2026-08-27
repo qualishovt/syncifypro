@@ -9,7 +9,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { redirect, Form, useLoaderData } from "react-router";
+import { redirect, useLoaderData } from "react-router";
 import { login } from "../shopify.server";
 import PlatformLogo from "../components/PlatformLogos.jsx";
 import { ResourcesMenu, MENU_CSS } from "../components/SiteChrome.jsx";
@@ -130,7 +130,7 @@ function ThemeToggle() {
 /* ── page ──────────────────────────────────────────────────────────────────── */
 
 export default function NewMarketing() {
-  const { showForm } = useLoaderData();
+  useLoaderData();
   return (
     <div style={s.root}>
       <style dangerouslySetInnerHTML={{ __html: THEME_CSS + MENU_CSS + CSS }} />
@@ -317,12 +317,7 @@ export default function NewMarketing() {
           <div style={s.ctaCard} className="nf-cta">
             <h2 style={s.ctaTitle}>Start managing your Shopify data today</h2>
             <p style={s.ctaSub}>Install and run your first export in under a minute.</p>
-            {showForm && (
-              <Form method="post" action="/auth/login" style={s.ctaForm} className="nf-ctaform">
-                <input style={s.ctaInput} type="text" name="shop" placeholder="your-store.myshopify.com" aria-label="Shop domain" autoComplete="off" />
-                <button style={s.btnPrimary} type="submit">Install</button>
-              </Form>
-            )}
+            <a href="https://apps.shopify.com/syncifypro" style={s.btnPrimary}>Install on the Shopify App Store</a>
           </div>
         </section>
       </main>

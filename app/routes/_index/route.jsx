@@ -11,7 +11,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { redirect, Form, useLoaderData } from "react-router";
+import { redirect, useLoaderData } from "react-router";
 import { login } from "../../shopify.server";
 import PlatformLogo from "../../components/PlatformLogos.jsx";
 import CrispChat from "../../components/CrispChat.jsx";
@@ -46,10 +46,10 @@ export const loader = async ({ request }) => {
 };
 
 export default function Index() {
-  const { showForm, installOnly, crispWebsiteId } = useLoaderData();
+  const { installOnly, crispWebsiteId } = useLoaderData();
   return (
     <>
-      {installOnly ? <InstallPage showForm={showForm} /> : <MarketingPage showForm={showForm} />}
+      {installOnly ? <InstallPage /> : <MarketingPage />}
       <CrispChat websiteId={crispWebsiteId} />
     </>
   );
@@ -58,7 +58,7 @@ export default function Index() {
 /* ─────────────────────────── install / login card ─────────────────────────── */
 
 /* eslint-disable react/prop-types */
-function InstallPage({ showForm }) {
+function InstallPage() {
   return (
     <main style={inst.page}>
       <div style={inst.card}>
@@ -66,15 +66,13 @@ function InstallPage({ showForm }) {
           <img src="/brand/syncifypro-icon-rounded.svg" alt="" width="32" height="32" style={inst.brandIcon} />
           <h1 style={inst.title}>SyncifyPro: Bulk Export, Import, Schedule &amp; Migrate</h1>
         </div>
-        {showForm ? (
-          <Form method="post" action="/auth/login" style={inst.form}>
-            <label style={inst.label} htmlFor="shop">Enter your shop domain to log in or install this app.</label>
-            <input id="shop" style={inst.input} type="text" name="shop" placeholder="example.myshopify.com" autoComplete="off" />
-            <button style={inst.button} type="submit">Install app</button>
-          </Form>
-        ) : (
-          <p style={inst.label}>Open this app from your Shopify admin.</p>
-        )}
+        {/* Installs must start on a Shopify surface (App Store req. 2.3.1), so we
+            link to the listing instead of asking for a myshopify.com domain.
+            Installed merchants reach the app from their admin, not this card. */}
+        <p style={inst.label}>Install SyncifyPro from the Shopify App Store, then open it from your Shopify admin.</p>
+        <a style={{ ...inst.button, display: "inline-block", textDecoration: "none", textAlign: "center" }} href="https://apps.shopify.com/syncifypro">
+          View on the Shopify App Store
+        </a>
       </div>
       <p style={inst.foot}>
         <a style={inst.footLink} href="https://syncifypro.app/">syncifypro.app</a>
@@ -158,7 +156,7 @@ const SOURCES = [
 
 const FORMATS = ["Excel (.xlsx)", "CSV", "Google Sheets", "FTP / SFTP", "Amazon S3", "Google Drive", "Email"];
 
-function MarketingPage({ showForm }) {
+function MarketingPage() {
   return (
     <div style={mk.root}>
       <style dangerouslySetInnerHTML={{ __html: THEME_CSS + RESPONSIVE_CSS }} />
@@ -273,12 +271,7 @@ function MarketingPage({ showForm }) {
         {/* final CTA */}
         <section id="install" style={mk.cta}>
           <h2 style={mk.ctaTitle}>Start managing your Shopify data today!</h2>
-          {showForm && (
-            <Form method="post" action="/auth/login" style={mk.ctaForm}>
-              <input style={mk.ctaInput} type="text" name="shop" placeholder="example.myshopify.com" aria-label="Shop domain" autoComplete="off" />
-              <button style={mk.installBtnLg} type="submit">Install</button>
-            </Form>
-          )}
+          <a href="https://apps.shopify.com/syncifypro" style={mk.installBtnLg}>Install on the Shopify App Store</a>
         </section>
       </main>
 
