@@ -147,7 +147,8 @@ function serializeJob(job) {
 // ─── Action (re-analyze with a plan / apply — both from the staged file) ────────
 
 export async function action({ request }) {
-  const { session } = await authenticate.admin(request);
+  /* Plan gating is loaded lazily so the many non-gated intents stay cheap. */
+  const { admin, session } = await authenticate.admin(request);
 
   const formData = await request.formData();
 
@@ -278,6 +279,11 @@ export async function action({ request }) {
   // current plan/options WITHOUT importing now — the runner re-imports the R2
   // snapshot at the scheduled time (repeats per the optional interval).
   if (intent === "createInlineImportSchedule") {
+    {
+      const { getPlan, upgradeError } = await import("../billing.server.js");
+      const { pro } = await getPlan(admin);
+      if (!pro) return data(upgradeError("Scheduling", session.shop), { status: 402 });
+    }
     try {
       const payload = JSON.parse(String(formData.get("payload") || "{}"));
       if (!payload.src || typeof payload.src !== "string") {
@@ -369,6 +375,17 @@ export async function action({ request }) {
     const { sheets, totals } = analyzeWorkbook({ fileBuffer, format, plan, filename: name, blockedEntities });
     if (totals.importable === 0) {
       return data({ error: "Nothing importable — no sheets selected or all rows invalid." }, { status: 400 });
+    }
+
+    // Free plan: imports over the row cap are blocked (blocking beats silently
+    // importing half a file — an import must be all-or-nothing per file).
+    {
+      const { getPlan, upgradeError, FREE_ROW_LIMIT } = await import("../billing.server.js");
+      const { pro } = await getPlan(admin);
+      if (!pro && totals.importable > FREE_ROW_LIMIT) {
+        const e = upgradeError(`Importing more than ${FREE_ROW_LIMIT} rows (this file has ${totals.importable})`, session.shop);
+        return data(e, { status: 402 });
+      }
     }
 
     const { createImportJob, armReadyImportJob } = await import("../db/bulkImportJob.server.js");

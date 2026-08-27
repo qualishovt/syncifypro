@@ -62,6 +62,7 @@ const MENU_GROUPS = [
     { key: "scopes",        label: "Permissions granted", icon: "key" },
   ] },
   { title: "App", items: [
+    { key: "plan",          label: "Plan",           icon: "star" },
     { key: "about",         label: "About",          icon: "info" },
   ] },
 ];
@@ -72,7 +73,7 @@ const IMPORT_MODE_LABELS = {
 };
 
 // The one-line current-value shown under each menu item.
-function summaryFor(key, settings, scopes) {
+function summaryFor(key, settings, scopes, plan) {
   switch (key) {
     case "defaults":      return `${settings.defaultExportFormat.toUpperCase()} · ${IMPORT_MODE_LABELS[settings.defaultImportMode] ?? "Normal"}`;
     case "timezone":      return settings.timezone;
@@ -85,6 +86,7 @@ function summaryFor(key, settings, scopes) {
     case "erasure":       return "Manual";
     case "security":      return settings.allowExternalDownloads ? "External allowed" : "In-app only";
     case "scopes":        return `${scopes.length} scope${scopes.length === 1 ? "" : "s"}`;
+    case "plan":          return plan?.pro ? plan.planName : "Free";
     default:              return "";
   }
 }
@@ -139,7 +141,12 @@ export async function loader({ request }) {
     appInfo = { name: "SyncifyPro", version: pkg.version || "" };
   } catch { /* keep default */ }
 
-  return { settings, scopes, appInfo };
+  // Current plan (Managed Pricing) + the plan-selection page for this shop.
+  const { getPlan, planPageUrl } = await import("../billing.server.js");
+  const planInfo = await getPlan(admin);
+  const plan = { ...planInfo, url: planPageUrl(session.shop) };
+
+  return { settings, scopes, appInfo, plan };
 }
 
 export async function action({ request }) {
@@ -187,7 +194,7 @@ export async function action({ request }) {
 // ─── page ────────────────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
-  const { settings, scopes, appInfo } = useLoaderData();
+  const { settings, scopes, appInfo, plan } = useLoaderData();
   const [active, setActive] = useState("defaults");
 
   return (
@@ -200,7 +207,7 @@ export default function SettingsPage() {
               <div style={menuGroupTitle}>{group.title}</div>
               {group.items.map((m) => {
                 const on = active === m.key;
-                const value = summaryFor(m.key, settings, scopes);
+                const value = summaryFor(m.key, settings, scopes, plan);
                 return (
                   <button
                     key={m.key}
@@ -230,6 +237,7 @@ export default function SettingsPage() {
           {active === "retention"     && <RetentionCard settings={settings} />}
           {active === "erasure"       && <ErasureCard />}
           {active === "scopes"        && <ScopesCard scopes={scopes} />}
+          {active === "plan"          && <PlanCard plan={plan} />}
           {active === "about"         && <AboutCard appInfo={appInfo} />}
         </div>
       </div>
@@ -485,6 +493,36 @@ function ScopesCard({ scopes }) {
           {scopes.map((s) => <span key={s} style={scopeChip}>{s}</span>)}
         </div>
       )}
+    </Card>
+  );
+}
+
+function PlanCard({ plan }) {
+  const pro = Boolean(plan?.pro);
+  const openPlans = () => window.open(plan.url, "_top");
+
+  return (
+    <Card heading="Plan" description="Your subscription. Billing is handled by Shopify.">
+      <s-stack direction="block" gap="small-200">
+        <s-text>
+          Current plan: <s-text type="strong">{pro ? plan.planName : "Free"}</s-text>
+        </s-text>
+        {pro ? (
+          <s-text color="subdued">
+            Unlimited rows per import and export, plus scheduling and migrations. Thanks for supporting SyncifyPro!
+          </s-text>
+        ) : (
+          <s-text color="subdued">
+            The Free plan includes imports and exports of up to 50 rows. Upgrade to Pro ($15/month)
+            for unlimited rows, scheduled jobs and platform migrations.
+          </s-text>
+        )}
+      </s-stack>
+      <s-divider />
+      <s-stack direction="inline" gap="small" alignItems="center">
+        <s-button variant="primary" onClick={openPlans}>{pro ? "Manage plan" : "Upgrade to Pro"}</s-button>
+        <s-text color="subdued">Opens the Shopify plan page.</s-text>
+      </s-stack>
     </Card>
   );
 }

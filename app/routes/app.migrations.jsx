@@ -42,7 +42,7 @@ export async function loader({ request }) {
 }
 
 export async function action({ request }) {
-  const { session } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
   const shop = session.shop;
   const fd = await request.formData();
   const intent = String(fd.get("intent") || "");
@@ -53,6 +53,13 @@ export async function action({ request }) {
   const meta = getPlatform(platform);
   if (!meta) return data({ error: "Unknown platform." }, { status: 400 });
   if (!meta.implemented) return data({ error: `${meta.label} isn’t connected yet — coming soon.` }, { status: 400 });
+
+  // Migrations are a Pro feature (disconnects stay available for cleanup).
+  if (["etsyConnect", "connect", "migrate", "validate"].includes(intent) || !intent) {
+    const { getPlan, upgradeError } = await import("../billing.server.js");
+    const { pro } = await getPlan(admin);
+    if (!pro) return data(upgradeError("Migrations", session.shop), { status: 402 });
+  }
 
   // ── Etsy OAuth: start the handshake / disconnect ────────────────────────────
   if (intent === "etsyConnect") {

@@ -129,13 +129,21 @@ function serializeSchedule(s, sched) {
 // ─── Action ────────────────────────────────────────────────────────────────────
 
 export async function action({ request }) {
-  const { session } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
   const shop = session.shop;
   const fd = await request.formData();
   const intent = String(fd.get("intent") || "save");
   const sched = await import("../db/schedule.server.js");
 
   try {
+    // Schedules are a Pro feature; delete/disable/disconnect stay available so
+    // a downgraded merchant can clean up.
+    const enablesToggle = intent === "toggle" && fd.get("enabled") === "true";
+    if (["run", "save"].includes(intent) || enablesToggle) {
+      const { getPlan, upgradeError } = await import("../billing.server.js");
+      const { pro } = await getPlan(admin);
+      if (!pro) return data(upgradeError("Scheduling", session.shop), { status: 402 });
+    }
     if (intent === "delete") {
       await sched.deleteSchedule(shop, String(fd.get("id")));
       return { ok: true };

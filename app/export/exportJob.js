@@ -552,7 +552,10 @@ export async function startExport({ admin, shop, specs, format, splitRows = null
  * which the bulk/streaming path never materializes — those stay on the
  * tracked path, the same way multi-entity always does.
  */
-async function maybeRouteToShopifyBulk({ admin, job, specs, format }) {
+async function maybeRouteToShopifyBulk({ admin, job, specs, format, options = {} }) {
+  // A row-capped (free plan) export must stay on the tracked path — the
+  // Shopify bulk pipeline streams entire datasets and cannot cap.
+  if (options.maxRows) return false;
   if (specs.length !== 1) return false;
   const s = specs[0];
   if (!STREAMABLE_FORMATS.includes(format) || !BULK_ENTITIES.includes(s.entity)) return false;
@@ -628,7 +631,7 @@ async function startTrackedExport({ admin, shop, specs, format, splitRows = null
   } catch (err) {
     console.warn("[export] queue unavailable, running in-process:", err.message);
     (async () => {
-      if (await maybeRouteToShopifyBulk({ admin, job, specs, format })) return;
+      if (await maybeRouteToShopifyBulk({ admin, job, specs, format, options })) return;
       await processTrackedExport({ admin, shop, job, specs, format, splitRows, options });
     })().catch(async (e) => {
       await markJobFailed({ id: job.id, errorMessage: e.message }).catch(() => {});
@@ -649,7 +652,7 @@ export async function runExportForJob({ admin, shop, jobId, specs, format, split
   try {
     // Huge stores hand off to a Shopify bulk operation here (webhook-driven
     // from that point); everyone else runs the tracked path.
-    if (await maybeRouteToShopifyBulk({ admin, job, specs, format })) return;
+    if (await maybeRouteToShopifyBulk({ admin, job, specs, format, options })) return;
     await processTrackedExport({ admin, shop, job, specs, format, splitRows, options });
   } catch (err) {
     await markJobFailed({ id: jobId, errorMessage: err.message }).catch(() => {});
@@ -795,7 +798,12 @@ async function processTrackedExportInner({ admin, shop, job, specs, format, spli
     base += entityDone;
     // Advanced filters (column/operator/value) are applied to the fetched rows
     // per record — they can't be pushed down into the Shopify query.
-    const rows = applySort(applyAdvancedFilters(fetched, spec.advancedFilters), spec.sort);
+    let rows = applySort(applyAdvancedFilters(fetched, spec.advancedFilters), spec.sort);
+    // Free-plan cap: at most options.maxRows rows across the whole export.
+    if (options.maxRows) {
+      const used = results.reduce((n, r) => n + r.rows.length, 0);
+      rows = rows.slice(0, Math.max(0, options.maxRows - used));
+    }
     results.push({ entity: spec.entity, rows, fields: spec.fields });
   }
 
