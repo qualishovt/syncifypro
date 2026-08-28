@@ -304,7 +304,7 @@ export default function JobsPage() {
                       ) : <s-text color="subdued">—</s-text>}
                     </s-table-cell>
                     <s-table-cell>
-                      <s-stack direction="inline" gap="small-300" alignItems="center">
+                      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "nowrap" }}>
                         {running ? (
                           <>
                             <s-tooltip id={`cancel-${j.id}`}>Cancel</s-tooltip>
@@ -335,7 +335,7 @@ export default function JobsPage() {
                             />
                           </>
                         )}
-                      </s-stack>
+                      </div>
                     </s-table-cell>
                   </s-table-row>
                 );

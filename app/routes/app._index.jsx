@@ -532,7 +532,7 @@ export default function Home() {
                           : <s-text color="subdued">—</s-text>}
                       </s-table-cell>
                       <s-table-cell>
-                        <s-stack direction="inline" gap="small-300" alignItems="center">
+                        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "nowrap" }}>
                           <s-tooltip id={`repeat-${j.id}`}>Repeat</s-tooltip>
                           <s-button
                             interestFor={`repeat-${j.id}`}
@@ -554,7 +554,7 @@ export default function Home() {
                             disabled={repeatingId ? true : undefined}
                             onClick={() => navigate(duplicateHref(j))}
                           />
-                        </s-stack>
+                        </div>
                       </s-table-cell>
                     </s-table-row>
                   );
