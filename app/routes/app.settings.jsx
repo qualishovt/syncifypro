@@ -86,7 +86,7 @@ function summaryFor(key, settings, scopes, plan) {
     case "erasure":       return "Manual";
     case "security":      return settings.allowExternalDownloads ? "External allowed" : "In-app only";
     case "scopes":        return `${scopes.length} scope${scopes.length === 1 ? "" : "s"}`;
-    case "plan":          return plan?.pro ? plan.planName : "Free";
+    case "plan":          return plan?.planName ?? "Basic";
     default:              return "";
   }
 }
