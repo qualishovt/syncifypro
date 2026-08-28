@@ -71,8 +71,16 @@ export async function loader({ request }) {
     const { getImportJob, createReadyImportJob } = await import("../db/bulkImportJob.server.js");
     if (readyId) {
       const row = await getImportJob(readyId);
-      if (row && row.shop === session.shop && row.status === "ready") {
-        readyJob = { id: row.id, number: row.number ?? null };
+      if (row && row.shop === session.shop) {
+        if (row.status === "ready") {
+          readyJob = { id: row.id, number: row.number ?? null };
+        } else {
+          // This preview's job has already been started (the post-action
+          // revalidation lands here). Follow it to its run page rather than
+          // minting a fresh "ready" row, which would bounce the merchant off
+          // the live progress they just kicked off.
+          return redirect(`/app/run/${row.id}`);
+        }
       }
     }
     if (!readyJob) {
