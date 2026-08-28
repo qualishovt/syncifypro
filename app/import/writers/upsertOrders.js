@@ -66,14 +66,13 @@ export async function upsertOrders(rows, admin, { onProgress } = {}) {
   // Small batches with a pause — respects the dev-store ~5 creates/minute cap
   // better than a wide fan-out while still overlapping network latency.
   let base = 0;
-  for (const batch of chunk(groups, 5)) {
+  for (const batch of chunk(groups, 8)) {
     const start = base;
     await Promise.all(batch.map((group, k) =>
-      writeGroup(group, admin, result).then((o) => { result.results[start + k] = o; })
+      writeGroup(group, admin, result).then((o) => { result.results[start + k] = o; onProgress?.(1); })
     ));
     base += batch.length;
-    onProgress?.(batch.length);
-    await sleep(250);
+    await sleep(120);
   }
   return result;
 }

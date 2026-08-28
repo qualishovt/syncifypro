@@ -477,6 +477,16 @@ export async function runImportForJob({ admin, shop, jobId, plan = null, options
     await markImportRunning({ id: jobId, progressTotal });
 
     let done = 0;
+    // Writers report each record as it lands, so the bar advances smoothly.
+    // Persist at most every 150ms — enough for the page's 1s poll, without one
+    // database write per row on a 100k-row import.
+    let lastPersist = 0;
+    const persistProgress = () => {
+      const now = Date.now();
+      if (now - lastPersist < 150) return;
+      lastPersist = now;
+      updateImportProgress({ id: jobId, progressCurrent: done }).catch(() => {});
+    };
     const totals = { created: 0, updated: 0, deleted: 0, failed: 0 };
     const sheetResults = [];
 
@@ -496,8 +506,7 @@ export async function runImportForJob({ admin, shop, jobId, plan = null, options
         options,
         onProgress: (n) => {
           done += n;
-          // Best-effort live update; the final count is set on completion.
-          updateImportProgress({ id: jobId, progressCurrent: done }).catch(() => {});
+          persistProgress();   // best-effort; the final count is set on completion
         },
       });
       totals.created += res.created ?? 0;

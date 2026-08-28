@@ -29,13 +29,12 @@ export async function upsertDiscounts(rows, admin, { onProgress } = {}) {
   const result = { created: 0, updated: 0, deleted: 0, skipped: 0, errors: [], results: new Array(rows.length) };
 
   let base = 0;
-  for (const batch of chunk(rows, 5)) {
+  for (const batch of chunk(rows, 10)) {
     const start = base;
     await Promise.all(batch.map((row, k) =>
-      writeRow(row, admin, result).then((o) => { result.results[start + k] = o; })));
+      writeRow(row, admin, result).then((o) => { result.results[start + k] = o; onProgress?.(1); })));
     base += batch.length;
-    onProgress?.(batch.length);
-    await sleep(50);
+    await sleep(20);
   }
   return result;
 }

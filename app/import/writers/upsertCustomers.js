@@ -59,14 +59,13 @@ export async function upsertCustomers(rows, admin, { onProgress } = {}) {
   const result = { created: 0, updated: 0, deleted: 0, skipped: 0, errors: [], results: new Array(groups.length) };
 
   let base = 0;
-  for (const batch of chunk(groups, 10)) {
+  for (const batch of chunk(groups, 16)) {
     const start = base;
     await Promise.all(batch.map((group, k) =>
-      writeGroup(group, admin, result).then((o) => { result.results[start + k] = o; })
+      writeGroup(group, admin, result).then((o) => { result.results[start + k] = o; onProgress?.(1); })
     ));
     base += batch.length;
-    onProgress?.(batch.length);
-    await sleep(50);
+    await sleep(20);
   }
   return result;
 }
