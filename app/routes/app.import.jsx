@@ -76,10 +76,10 @@ export async function loader({ request }) {
           readyJob = { id: row.id, number: row.number ?? null };
         } else {
           // This preview's job has already been started (the post-action
-          // revalidation lands here). Follow it to its run page rather than
+          // revalidation lands here). Follow it to its run URL rather than
           // minting a fresh "ready" row, which would bounce the merchant off
           // the live progress they just kicked off.
-          return redirect(`/app/run/${row.id}`);
+          return redirect(`/app/import?jobId=${row.id}`);
         }
       }
     }
@@ -707,12 +707,15 @@ function ImportPage() {
     }
   }, [preview, plan]);
 
-  // When apply returns a jobId, hand off to the run's own page — the same
-  // one Export lands on and Activity links to — which polls live progress
-  // and offers cancel/results. `replace` keeps Back from re-running apply.
+  // When apply returns a jobId, stay on this page and give the run its own
+  // URL (/app/import?jobId=…): it polls live progress and then shows the
+  // import-specific result — counts, results workbook, deliver-to, failed
+  // rows, and the locked cards recording what actually ran. `replace` keeps
+  // Back from re-running apply.
   useEffect(() => {
     if (d?.mode === "apply" && d.jobId) {
-      navigate(`/app/run/${encodeURIComponent(d.jobId)}`, { replace: true });
+      setPollingJobId(d.jobId);
+      navigate(`/app/import?jobId=${encodeURIComponent(d.jobId)}`, { replace: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [d]);
