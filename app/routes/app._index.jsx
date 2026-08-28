@@ -175,13 +175,16 @@ async function repeatImport(shop, jobId) {
     plan, options,
   });
   await enqueueImport({ jobId: newJob.id, shop, plan, options: options ?? {} });
-  return redirect(`/app/run/${newJob.id}`);
+  return redirect(`/app/import?jobId=${newJob.id}`);
 }
 
 const iso = (d) => (d ? new Date(d).toISOString() : null);
 const stripExt = (name) => String(name ?? "").replace(/\.[^.]+$/, "");
 // A Recent-activity row's "#" links to that job's page (progress / downloads).
-const jobHref = (j) => `/app/run/${j.id}`;
+// Imports get their own page: it shows the counts, the results workbook with
+// deliver-to, the failed-rows file and the cards recording what actually ran —
+// none of which the generic run page has.
+const jobHref = (j) => (j.type === "import" ? `/app/import?jobId=${j.id}` : `/app/run/${j.id}`);
 
 function importMeta(j) {
   const base = (j.filename ? stripExt(j.filename) : titleCaseList(j.entity)) || "import";

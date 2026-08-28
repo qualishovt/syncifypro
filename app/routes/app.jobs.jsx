@@ -107,10 +107,13 @@ function importRow(j) {
   if (j.sourceR2Key) files.push({ key: j.sourceR2Key, name: j.filename || "source" });
   if (j.status === "complete" && j.resultR2Key) files.push({ key: j.resultR2Key, name: "Import result.xlsx" });
   // A "ready" preview links back to its import page (to finish configuring
-  // and run it) rather than to a run page that has nothing to show yet.
+  // and run it) rather than to a run page that has nothing to show yet. Every
+  // other import links to its own import page too: the counts, results
+  // workbook + deliver-to, failed-rows file and the cards recording what ran
+  // live there, not on the generic run page.
   const previewHref = j.status === "ready" && j.sourceR2Key
     ? `/app/import?src=${encodeURIComponent(j.sourceR2Key)}&name=${encodeURIComponent(j.filename || "import")}&job=${encodeURIComponent(j.id)}`
-    : null;
+    : `/app/import?jobId=${encodeURIComponent(j.id)}`;
   return {
     id: j.id, type: "import", number: j.number ?? null,
     name: (j.filename || titleCase(j.entity) || "import").replace(/\.[^.]+$/, ""),
@@ -169,7 +172,7 @@ export async function action({ request }) {
         sourceR2Key: job.sourceR2Key, progressTotal: job.progressTotal ?? null, plan, options,
       });
       await enqueueImport({ jobId: fresh.id, shop: session.shop, plan, options: options ?? {} });
-      return { ok: true, goto: `/app/run/${fresh.id}` };
+      return { ok: true, goto: `/app/import?jobId=${fresh.id}` };
     }
     return data({ error: "Unknown action." }, { status: 400 });
   } catch (err) {
