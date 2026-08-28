@@ -699,16 +699,12 @@ function ImportPage() {
     }
   }, [preview, plan]);
 
-  // When apply returns a jobId, start polling — and give the run its own
-  // URL (/app/import?jobId=…), distinct from the preview's, so a refresh
-  // shows the run's state, not the before-import preview.
+  // When apply returns a jobId, hand off to the run's own page — the same
+  // one Export lands on and Activity links to — which polls live progress
+  // and offers cancel/results. `replace` keeps Back from re-running apply.
   useEffect(() => {
     if (d?.mode === "apply" && d.jobId) {
-      setPollingJobId(d.jobId);
-      // Through the router (not raw history.replaceState): App Bridge mirrors
-      // router navigations to the admin's address bar, so the copied URL is
-      // the run's. `replace` keeps Back from returning to the preview.
-      navigate(`/app/import?jobId=${encodeURIComponent(d.jobId)}`, { replace: true });
+      navigate(`/app/run/${encodeURIComponent(d.jobId)}`, { replace: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [d]);
