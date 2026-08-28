@@ -124,6 +124,9 @@ function importRow(j) {
     createdAt: iso(j.createdAt), completedAt: iso(j.completedAt),
     errorMessage: j.errorMessage ?? null,
     href: previewHref,
+    // Duplicate needs the staged file to reopen the preview for editing.
+    srcKey: j.sourceR2Key ?? null,
+    srcName: j.filename ?? null,
     _files: files,
   };
 }
@@ -185,6 +188,15 @@ export async function action({ request }) {
 // "ready" = an import preview whose file is staged and numbered but not yet
 // run (the row Import arms) — a benign, actionable state.
 const STATUS_TONE = { complete: "success", failed: "critical", running: "info", pending: "info", ready: "attention", cancelled: "warning" };
+
+// Duplicate opens the job's configuration for editing (nothing runs): exports
+// prefill the Export page from the stored spec; imports reopen the preview on
+// the staged file (falling back to the job page if the file is gone).
+const duplicateHref = (j) => (j.type === "export"
+  ? `/app/export?duplicate=${encodeURIComponent(j.id)}`
+  : j.srcKey
+    ? `/app/import?src=${encodeURIComponent(j.srcKey)}&name=${encodeURIComponent(j.srcName || "import")}`
+    : `/app/import?jobId=${encodeURIComponent(j.id)}`);
 const STATUS_LABEL = { complete: "Complete", failed: "Failed", running: "Running", pending: "Queued", ready: "Ready to import", cancelled: "Cancelled" };
 
 export default function JobsPage() {
@@ -311,6 +323,15 @@ export default function JobsPage() {
                               interestFor={`repeat-${j.id}`} accessibilityLabel="Repeat run"
                               disabled={busy ? true : undefined}
                               onClick={() => act("repeat", j)}
+                            />
+                            {/* Duplicate: open this job's configuration to
+                                tweak and run — Repeat runs it as-is. */}
+                            <s-tooltip id={`dup-${j.id}`}>Duplicate</s-tooltip>
+                            <s-button
+                              variant="secondary" icon="duplicate"
+                              interestFor={`dup-${j.id}`} accessibilityLabel="Duplicate job"
+                              disabled={busy ? true : undefined}
+                              onClick={() => navigate(duplicateHref(j))}
                             />
                           </>
                         )}

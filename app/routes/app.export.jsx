@@ -541,6 +541,26 @@ export async function loader({ request }) {
   const { getAppSettings } = await import("../db/appSettings.server.js");
   const presets = (await listPresets(session.shop)).map(serializePreset);
   const { defaultExportFormat: defaultFormat, blockedEntities, timezone } = await getAppSettings(session.shop);
+
+  // Duplicate a past export (?duplicate=<jobId>): open this page with that
+  // job's configuration loaded but nothing running — tweak, then export.
+  let duplicateExport = null;
+  const dupId = url.searchParams.get("duplicate");
+  if (dupId) {
+    const dupJob = await getJob(dupId).catch(() => null);
+    if (dupJob && dupJob.shop === session.shop && dupJob.spec) {
+      const { parseJobSpec } = await import("../db/bulkExportJob.server.js");
+      const parsed = parseJobSpec(dupJob.spec);
+      if (parsed.specs) {
+        duplicateExport = {
+          format: dupJob.format,
+          spec: parsed.specs,
+          splitRows: parsed.splitRows ?? null,
+          options: parsed.options ?? null,
+        };
+      }
+    }
+  }
   // Cheap local query — lets "Latest Export" restore the last run's
   // configuration even on a fresh page load.
   const latestExport = await latestExportSpec(session.shop).catch(() => null);
@@ -572,11 +592,11 @@ export async function loader({ request }) {
     try {
       counts.activity = await countJobsForShop(session.shop); // app-owned entity
     } catch { /* leave as "—" */ }
-    return { polledJob: null, servers, counts, lastExports, productDynamic: dynamic, ready: true, presets, defaultFormat, blockedEntities, timezone, shopTimezone, latestExport };
+    return { polledJob: null, servers, counts, lastExports, productDynamic: dynamic, ready: true, presets, defaultFormat, blockedEntities, timezone, shopTimezone, latestExport, duplicateExport };
   }
 
   // Initial page load: return the shell instantly. Counts arrive via ?data=1.
-  return { polledJob: null, servers, counts: {}, lastExports: {}, productDynamic: EMPTY_PRODUCT_DYNAMIC, ready: false, presets, defaultFormat, blockedEntities, timezone, latestExport };
+  return { polledJob: null, servers, counts: {}, lastExports: {}, productDynamic: EMPTY_PRODUCT_DYNAMIC, ready: false, presets, defaultFormat, blockedEntities, timezone, latestExport, duplicateExport };
 }
 
 // A stored preset → the shape the export UI uses (entityState + format), plus
@@ -1010,6 +1030,20 @@ export default function ExportPage() {
 
   // Per-entity state: { enabled, filters: {key→value}, selectedFields: string[] }
   const [entityState, setEntityState] = useState(() => initialEntityState());
+
+  // Opened via Duplicate (?duplicate=<jobId>): load that run's configuration
+  // once, ready to tweak — nothing starts until Export is clicked.
+  const dupApplied = useRef(false);
+  useEffect(() => {
+    const dup = loaderData.duplicateExport;
+    if (!dup || dupApplied.current) return;
+    dupApplied.current = true;
+    setFormat(dup.format);
+    setEntityState(normalizeStateSorts(stateFromSpec(dup.spec)));
+    setSplitRows(dup.splitRows != null ? String(dup.splitRows) : "");
+    applyAdvancedOptions(dup.options ?? {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaderData.duplicateExport]);
 
   // Sheet Permissions (Settings): entities blocked there are hidden here and
   // can't be exported. `visibleEntities` drives both the cards and the specs.
