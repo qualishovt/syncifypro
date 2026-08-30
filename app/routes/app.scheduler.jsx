@@ -685,7 +685,7 @@ export default function SchedulerPage() {
   );
 
   return (
-    <s-page heading="Scheduler">
+    <s-page heading="Schedules">
       <s-section>
         <s-stack direction="inline" gap="small-300" alignItems="center">
           <s-text color="subdued">
