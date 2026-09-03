@@ -4,9 +4,9 @@
  * App settings, Matrixify-style: a left menu of sections, each opening its own
  * card on the right.
  *
- *   • Defaults       — default export format + import mode (pre-selected on those pages)
+ *   • Defaults       — default export format + import mode (pre-selected on those
+ *                      pages) + the time zone timestamps are shown in / schedules default to
  *   • Notifications  — email + notify-on-success / notify-on-error for finished jobs
- *   • Time zone      — the zone job/schedule timestamps are displayed in
  *   • File retention — how long download files are kept, + delete-expired-now
  *
  * Everything persists to AppSettings (one row per shop).
@@ -43,7 +43,6 @@ const IMPORT_MODE_CHOICES = [
 const MENU_GROUPS = [
   { title: "General", items: [
     { key: "defaults",      label: "Defaults",       icon: "settings" },
-    { key: "timezone",      label: "Time zone",      icon: "clock" },
     { key: "notifications", label: "Notifications",  icon: "notification" },
   ] },
   { title: "Files & data", items: [
@@ -69,8 +68,7 @@ const IMPORT_MODE_LABELS = {
 // The one-line current-value shown under each menu item.
 function summaryFor(key, settings, scopes, plan) {
   switch (key) {
-    case "defaults":      return `${FORMAT_CHOICES.find((f) => f.value === settings.defaultExportFormat)?.label ?? settings.defaultExportFormat} · ${IMPORT_MODE_LABELS[settings.defaultImportMode] ?? "Normal"}`;
-    case "timezone":      return settings.timezone;
+    case "defaults":      return `${FORMAT_CHOICES.find((f) => f.value === settings.defaultExportFormat)?.label ?? settings.defaultExportFormat} · ${IMPORT_MODE_LABELS[settings.defaultImportMode] ?? "Normal"} · ${settings.timezone}`;
     case "notifications": return settings.notifyOnSuccess || settings.notifyOnError ? "On" : "Off";
     case "permissions": {
       const blocked = settings.blockedEntities?.length ?? 0;
@@ -167,13 +165,13 @@ export async function action({ request }) {
     saveDefaults: {
       defaultExportFormat: String(fd.get("defaultExportFormat") || "excel"),
       defaultImportMode: String(fd.get("defaultImportMode") || "normal"),
+      timezone: String(fd.get("timezone") || "UTC"),
     },
     saveNotifications: {
       notifyEmail: String(fd.get("notifyEmail") || ""),
       notifyOnSuccess: fd.get("notifyOnSuccess") === "true",
       notifyOnError: fd.get("notifyOnError") === "true",
     },
-    saveTimezone: { timezone: String(fd.get("timezone") || "UTC") },
     saveRetention: { retentionDays: String(fd.get("retentionDays") ?? "7") },
     saveSecurity: { allowExternalDownloads: fd.get("allowExternalDownloads") === "true" },
     saveSheetPermissions: { blockedEntities: String(fd.get("blockedEntities") || "[]") },
@@ -226,7 +224,6 @@ export default function SettingsPage() {
           {active === "security"      && <SecurityCard settings={settings} />}
           {active === "notifications" && <NotificationsCard settings={settings} />}
           {active === "defaults"      && <DefaultsCard settings={settings} />}
-          {active === "timezone"      && <TimezoneCard settings={settings} />}
           {active === "permissions"   && <SheetPermissionsCard settings={settings} />}
           {active === "retention"     && <RetentionCard settings={settings} />}
           {active === "erasure"       && <ErasureCard />}
@@ -300,15 +297,16 @@ function DefaultsCard({ settings }) {
   const saving = fetcher.state !== "idle";
   const [format, setFormat] = useState(settings.defaultExportFormat);
   const [mode, setMode] = useState(settings.defaultImportMode);
-  const dirty = format !== settings.defaultExportFormat || mode !== settings.defaultImportMode;
+  const [tz, setTz] = useState(settings.timezone);
+  const dirty = format !== settings.defaultExportFormat || mode !== settings.defaultImportMode || tz !== settings.timezone;
 
   const save = () => fetcher.submit(
-    { intent: "saveDefaults", defaultExportFormat: format, defaultImportMode: mode },
+    { intent: "saveDefaults", defaultExportFormat: format, defaultImportMode: mode, timezone: tz },
     { method: "post" },
   );
 
   return (
-    <Card heading="Defaults" description="Pre-select the export format and import mode used when you open a new export or import. You can still change them per job.">
+    <Card heading="Defaults" description="Pre-select the export format and import mode used when you open a new export or import, and the time zone job times are shown in — new schedules start in this zone too. You can still change them per job or schedule.">
       <div style={{ maxWidth: 340 }}>
         <PolarisSelect label="Default export format" value={format} onChange={setFormat} disabled={saving}>
           {FORMAT_CHOICES.map((f) => <s-option key={f.value} value={f.value}>{f.label}</s-option>)}
@@ -317,6 +315,11 @@ function DefaultsCard({ settings }) {
       <div style={{ maxWidth: 420 }}>
         <PolarisSelect label="Default import mode" value={mode} onChange={setMode} disabled={saving}>
           {IMPORT_MODE_CHOICES.map((m) => <s-option key={m.value} value={m.value}>{m.label}</s-option>)}
+        </PolarisSelect>
+      </div>
+      <div style={{ maxWidth: 340 }}>
+        <PolarisSelect label="Time zone" value={tz} onChange={setTz} disabled={saving}>
+          {timezoneChoices(tz).map((z) => <s-option key={z} value={z}>{timezoneLabel(z)}</s-option>)}
         </PolarisSelect>
       </div>
       <SaveRow onSave={save} saving={saving} saved={fetcher.data?.saved === "saveDefaults" && !saving} disabled={!dirty} />
@@ -350,26 +353,6 @@ function NotificationsCard({ settings }) {
         Preferences are saved now; email delivery is turned on once the app’s email sending is configured.
       </s-banner>
       <SaveRow onSave={save} saving={saving} saved={fetcher.data?.saved === "saveNotifications" && !saving} disabled={!dirty} />
-    </Card>
-  );
-}
-
-function TimezoneCard({ settings }) {
-  const fetcher = useFetcher();
-  const saving = fetcher.state !== "idle";
-  const [tz, setTz] = useState(settings.timezone);
-  const dirty = tz !== settings.timezone;
-
-  const save = () => fetcher.submit({ intent: "saveTimezone", timezone: tz }, { method: "post" });
-
-  return (
-    <Card heading="Time zone" description="Job times across the app are displayed in this zone. Each schedule has its own timezone (defaulting to your store's), and its run time is read in that zone.">
-      <div style={{ maxWidth: 340 }}>
-        <PolarisSelect label="Display time zone" value={tz} onChange={setTz} disabled={saving}>
-          {timezoneChoices(tz).map((z) => <s-option key={z} value={z}>{timezoneLabel(z)}</s-option>)}
-        </PolarisSelect>
-      </div>
-      <SaveRow onSave={save} saving={saving} saved={fetcher.data?.saved === "saveTimezone" && !saving} disabled={!dirty} />
     </Card>
   );
 }
