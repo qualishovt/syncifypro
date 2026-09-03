@@ -2,7 +2,7 @@
  * app/routes/app.settings.jsx
  *
  * App settings, Matrixify-style: a left menu of sections, each opening its own
- * card on the right.
+ * card on the right. Menu items are grouped by spacing only (no group headings).
  *
  *   • Defaults       — default export format + import mode (pre-selected on those pages)
  *   • Notifications  — email + notify-on-success / notify-on-error for finished jobs
@@ -198,7 +198,6 @@ export default function SettingsPage() {
         <nav style={menuCol}>
           {MENU_GROUPS.map((group) => (
             <div key={group.title} style={menuGroup}>
-              <div style={menuGroupTitle}>{group.title}</div>
               {group.items.map((m) => {
                 const on = active === m.key;
                 const value = summaryFor(m.key, settings, scopes, plan);
@@ -566,10 +565,6 @@ const menuCol = {
   border: "1px solid #e1e3e5", borderRadius: 12, padding: ".6rem", background: "#fff",
 };
 const menuGroup = { display: "flex", flexDirection: "column", gap: ".1rem" };
-const menuGroupTitle = {
-  fontSize: ".68rem", fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase",
-  color: "#8a8f96", padding: ".1rem .7rem .3rem",
-};
 const menuItem = {
   display: "flex", alignItems: "center", gap: ".55rem",
   textAlign: "left", padding: ".45rem .6rem", border: "none",
