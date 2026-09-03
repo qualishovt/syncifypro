@@ -562,7 +562,7 @@ function AboutCard({ appInfo }) {
 // ─── styles ──────────────────────────────────────────────────────────────────
 
 const planGrid = {
-  display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: "1rem", alignItems: "stretch",
+  display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "1rem", alignItems: "stretch",
 };
 
 const layout = {
