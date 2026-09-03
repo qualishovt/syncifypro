@@ -3,15 +3,13 @@
  *
  * Recurring exports/imports. A tick (every minute, from queue/init) runs any
  * schedule whose nextRunAt has passed: it creates a normal export/import job so
- * the run appears in Recent activity, then advances nextRunAt. All cadence math
- * is in UTC (the UI shows job times in UTC too).
+ * the run appears in Recent activity, then advances nextRunAt. Cadence math
+ * runs on the schedule's own clock (its IANA timezone); nextRunAt is UTC.
  */
 
 import { createHash } from "node:crypto";
 import db from "../db.server.js";
 import { encryptSecret, decryptSecret } from "../utils/crypto.server.js";
-
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 // Sentinel the UI sends back for an unchanged stored secret, so real secrets
 // never round-trip to the browser.
@@ -111,84 +109,11 @@ function encryptDestinations(incoming, storedRaw) {
 
 // ─── Cadence ────────────────────────────────────────────────────────────────────
 
-/**
- * Next run Date (UTC) at/after `from` for a schedule's cadence.
- * @param {{frequency:string,hour?:number,minute?:number,weekday?:number,monthday?:number}} sch
- */
-export function computeNextRun(sch, from = new Date()) {
-  // Deferred first run ("Schedule on"): until startAt passes, that IS the
-  // next run — regardless of any cadence.
-  if (sch.startAt && new Date(sch.startAt) > from) return new Date(sch.startAt);
-
-  // Interval cadence ("Repeat every N units") overrides the fixed
-  // frequencies. Months/years are calendar-approximated (30/365 days).
-  if (sch.intervalUnit && sch.intervalCount > 0) {
-    const MS = {
-      minutes: 60_000, hours: 3_600_000, days: 86_400_000,
-      weeks: 604_800_000, months: 2_592_000_000, years: 31_536_000_000,
-    };
-    const ms = MS[sch.intervalUnit];
-    if (ms) return new Date(from.getTime() + sch.intervalCount * ms);
-  }
-
-  const hour = clampInt(sch.hour, 0, 23, 3);
-  const minute = clampInt(sch.minute, 0, 59, 0);
-
-  // Sub-hourly: the next slot on a fixed N-minute grid (:00/:15/:30/:45).
-  // setUTCMinutes handles the rollover into the next hour/day.
-  if (sch.frequency === "every15min" || sch.frequency === "every30min") {
-    const step = sch.frequency === "every15min" ? 15 : 30;
-    const next = new Date(from);
-    next.setUTCSeconds(0, 0);
-    next.setUTCMinutes(Math.floor(next.getUTCMinutes() / step) * step + step);
-    return next;
-  }
-
-  if (sch.frequency === "hourly") {
-    const next = new Date(Date.UTC(
-      from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate(), from.getUTCHours(), minute, 0, 0,
-    ));
-    if (next <= from) next.setUTCHours(next.getUTCHours() + 1);
-    return next;
-  }
-
-  if (sch.frequency === "weekly") {
-    const wd = clampInt(sch.weekday, 0, 6, 1);
-    let next = atTime(from, hour, minute);
-    for (let i = 0; i < 8; i++) {
-      if (next.getUTCDay() === wd && next > from) return next;
-      next = atTime(new Date(next.getTime() + DAY_MS), hour, minute);
-    }
-    return next;
-  }
-
-  if (sch.frequency === "monthly") {
-    const md = clampInt(sch.monthday, 1, 31, 1);
-    let next = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), md, hour, minute, 0, 0));
-    if (next <= from) next = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth() + 1, md, hour, minute, 0, 0));
-    return next;
-  }
-
-  if (sch.frequency === "quarterly") {
-    const md = clampInt(sch.monthday, 1, 31, 1);
-    let next = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), md, hour, minute, 0, 0));
-    while (next <= from) {
-      next = new Date(Date.UTC(next.getUTCFullYear(), next.getUTCMonth() + 3, md, hour, minute, 0, 0));
-    }
-    return next;
-  }
-
-  // daily (default)
-  let next = atTime(from, hour, minute);
-  if (next <= from) next = new Date(next.getTime() + DAY_MS);
-  return next;
-}
-
-const atTime = (d, h, m) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), h, m, 0, 0));
-const clampInt = (v, lo, hi, def) => {
-  const n = Number(v);
-  return Number.isInteger(n) && n >= lo && n <= hi ? n : def;
-};
+// Next-run maths lives in schedules/nextrun.js (pure, timezone-aware: the
+// schedule's hour/minute/weekday/monthday are read in its IANA `timezone`);
+// re-exported so existing imports from this module keep working.
+import { computeNextRun, isValidTimezone, zonedDateTimeToUtc } from "../schedules/nextrun.js";
+export { computeNextRun, isValidTimezone, zonedDateTimeToUtc };
 
 // ─── Execution ────────────────────────────────────────────────────────────────
 
@@ -697,22 +622,6 @@ export async function runDueSchedules() {
     });
   }
   return due.length;
-}
-
-/**
- * Interpret Y-M-D + H:M as wall-clock time in `tz` → absolute UTC Date.
- * (The standard offset-probe trick; DST boundary hours resolve approximately.)
- */
-export function zonedDateTimeToUtc(dateStr, hour, minute, tz) {
-  const [y, m, d] = String(dateStr).split("-").map((n) => parseInt(n, 10));
-  if (!y || !m || !d) return null;
-  const guess = Date.UTC(y, m - 1, d, clampInt(hour, 0, 23, 0), clampInt(minute, 0, 59, 0), 0);
-  try {
-    const asTz = new Date(new Date(guess).toLocaleString("en-US", { timeZone: tz || "UTC" }));
-    return new Date(guess + (guess - asTz.getTime()));
-  } catch {
-    return new Date(guess);
-  }
 }
 
 let started = false;

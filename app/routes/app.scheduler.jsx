@@ -68,8 +68,19 @@ const DESTINATIONS = [
 // ─── Loader ────────────────────────────────────────────────────────────────────
 
 export async function loader({ request }) {
-  const { session } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
   const sched = await import("../db/schedule.server.js");
+
+  // The store's own timezone — the default for new schedules, so "08:00"
+  // means 08:00 where the merchant is.
+  let shopTimezone = "UTC";
+  try {
+    const res = await admin.graphql(`{ shop { ianaTimezone } }`);
+    const body = await res.json();
+    shopTimezone = body?.data?.shop?.ianaTimezone || "UTC";
+  } catch {
+    // leave UTC
+  }
   const { listPresets } = await import("../db/exportPreset.server.js");
   const { listImportPresets } = await import("../db/importPreset.server.js");
   const { getAppSettings } = await import("../db/appSettings.server.js");
@@ -97,6 +108,7 @@ export async function loader({ request }) {
     schedules, history, presets, importPresets, servers,
     blockedEntities: blockedEntities ?? [],
     shop: session.shop,
+    shopTimezone,
     google: {
       configured: google.googleConfigured(),
       connected: Boolean(conn?.refreshToken),
@@ -172,6 +184,12 @@ export async function action({ request }) {
       const n = parseInt(v, 10);
       return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : dflt;
     };
+    const timezone = String(fd.get("timezone") || "UTC").trim();
+    if (!sched.isValidTimezone(timezone)) {
+      return data({
+        error: `Unknown timezone "${timezone}" — use an IANA name such as Europe/London or America/New_York.`,
+      }, { status: 400 });
+    }
     const base = {
       name,
       frequency: String(fd.get("frequency") || "daily"),
@@ -179,7 +197,7 @@ export async function action({ request }) {
       minute: clamp(fd.get("minute"), 0, 59, 0),
       weekday: clamp(fd.get("weekday"), 0, 6, 1),
       monthday: clamp(fd.get("monthday"), 1, 28, 1),
-      timezone: String(fd.get("timezone") || "UTC"),
+      timezone,
       destinations: String(fd.get("destinations") || ""),
       enabled: fd.get("enabled") !== "false",
     };
@@ -294,6 +312,21 @@ export async function action({ request }) {
 // ─── helpers ───────────────────────────────────────────────────────────────────
 
 const fmtDateTime = (iso) => (iso ? iso.slice(0, 16).replace("T", " ") : "—");
+
+// nextRunAt is a UTC instant; show it on the schedule's own clock, labelled.
+const fmtInTz = (iso, tz) => {
+  if (!iso) return "—";
+  try {
+    const t = new Date(iso).toLocaleString("en-GB", {
+      timeZone: tz || "UTC",
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", hour12: false,
+    });
+    return `${t} (${tz || "UTC"})`;
+  } catch {
+    return fmtDateTime(iso);
+  }
+};
 
 function scheduleSummary(s) {
   const t = `${String(s.hour).padStart(2, "0")}:${String(s.minute).padStart(2, "0")}`;
@@ -442,7 +475,7 @@ const BLANK = {
 // ─── UI ─────────────────────────────────────────────────────────────────────────
 
 export default function SchedulerPage() {
-  const { schedules, history, presets, importPresets, servers, google, shop, blockedEntities, emailConfigured } = useLoaderData();
+  const { schedules, history, presets, importPresets, servers, google, shop, shopTimezone, blockedEntities, emailConfigured } = useLoaderData();
   const navigate = useNavigate();
 
   // Sheet Permissions (Settings): entities blocked there are hidden here too,
@@ -493,7 +526,7 @@ export default function SchedulerPage() {
   }, [actionData, navigation.state]);
 
   const openNew = () => {
-    setForm({ ...BLANK, presetId: presets[0]?.id ?? "" });
+    setForm({ ...BLANK, presetId: presets[0]?.id ?? "", timezone: shopTimezone || "UTC" });
     setTab("schedules");
     setShowForm(true);
   };
@@ -759,7 +792,7 @@ export default function SchedulerPage() {
                     <s-table-cell>{scheduleSummary(s)}</s-table-cell>
                     <s-table-cell>{String(s.format).toUpperCase()}</s-table-cell>
                     <s-table-cell>{enabledDestLabels(s.destinations)}</s-table-cell>
-                    <s-table-cell>{fmtDateTime(s.nextRunAt)}</s-table-cell>
+                    <s-table-cell>{fmtInTz(s.nextRunAt, s.timezone)}</s-table-cell>
                     <s-table-cell>
                       <PolarisSwitch
                         label={s.enabled ? "Enabled" : "Paused"}
@@ -1053,6 +1086,7 @@ export default function SchedulerPage() {
               )}
               <PolarisTextField
                 label="Timezone"
+                placeholder="IANA name, e.g. Europe/London"
                 value={form.timezone}
                 onChange={(v) => set({ timezone: v })}
               />
