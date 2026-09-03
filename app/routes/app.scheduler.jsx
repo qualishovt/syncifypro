@@ -313,16 +313,16 @@ export async function action({ request }) {
 
 const fmtDateTime = (iso) => (iso ? iso.slice(0, 16).replace("T", " ") : "—");
 
-// nextRunAt is a UTC instant; show it on the schedule's own clock, labelled.
+// nextRunAt is a UTC instant; show it on the schedule's own clock. The zone
+// is rendered on its own line so the label never widens the column.
 const fmtInTz = (iso, tz) => {
   if (!iso) return "—";
   try {
-    const t = new Date(iso).toLocaleString("en-GB", {
+    return new Date(iso).toLocaleString("en-GB", {
       timeZone: tz || "UTC",
       year: "numeric", month: "2-digit", day: "2-digit",
       hour: "2-digit", minute: "2-digit", hour12: false,
     });
-    return `${t} (${tz || "UTC"})`;
   } catch {
     return fmtDateTime(iso);
   }
@@ -792,7 +792,10 @@ export default function SchedulerPage() {
                     <s-table-cell>{scheduleSummary(s)}</s-table-cell>
                     <s-table-cell>{String(s.format).toUpperCase()}</s-table-cell>
                     <s-table-cell>{enabledDestLabels(s.destinations)}</s-table-cell>
-                    <s-table-cell>{fmtInTz(s.nextRunAt, s.timezone)}</s-table-cell>
+                    <s-table-cell>
+                      <div style={{ whiteSpace: "nowrap" }}>{fmtInTz(s.nextRunAt, s.timezone)}</div>
+                      {s.nextRunAt && <s-text color="subdued">{s.timezone || "UTC"}</s-text>}
+                    </s-table-cell>
                     <s-table-cell>
                       <PolarisSwitch
                         label={s.enabled ? "Enabled" : "Paused"}
@@ -801,7 +804,8 @@ export default function SchedulerPage() {
                       />
                     </s-table-cell>
                     <s-table-cell>
-                      <s-stack direction="inline" gap="small-300" alignItems="center">
+                      {/* Plain flex, not s-stack: it must never wrap the Delete button onto a second line. */}
+                      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "nowrap" }}>
                         <s-tooltip id={`run-${s.id}`}>Run now</s-tooltip>
                         <s-button
                           variant="primary"
@@ -828,7 +832,7 @@ export default function SchedulerPage() {
                           accessibilityLabel={`Delete ${s.name}`}
                           onClick={() => remove(s.id)}
                         ></s-button>
-                      </s-stack>
+                      </div>
                     </s-table-cell>
                   </s-table-row>
                 ))}
