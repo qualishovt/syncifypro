@@ -490,40 +490,54 @@ function ScopesCard({ scopes }) {
   );
 }
 
+// Plan cards — the same layout as ReportifyPro's Plan section. Plans live in
+// Shopify App Pricing (Managed Pricing), so every "Choose" button opens
+// Shopify's plan-selection page; the app only reads the active subscription.
 const PLAN_TIERS = [
-  { name: "Basic",      price: "Free",      rows: "100 rows per job",     extras: "—" },
-  { name: "Pro",        price: "$12/month",  rows: "10,000 rows per job",  extras: "Schedules + migrations" },
-  { name: "Max",        price: "$40/month",  rows: "100,000 rows per job", extras: "Schedules + migrations" },
-  { name: "Enterprise", price: "$150/month", rows: "Unlimited rows",       extras: "Schedules + migrations + priority support" },
+  { name: "Basic", price: "Free", cadence: "", features: ["100 rows per export/import job", "All entities and formats", "Saved presets"] },
+  { name: "Pro", price: "$12", cadence: "/month", popular: true, features: ["10,000 rows per job", "Scheduled exports & imports", "Email / FTP / Drive / S3 delivery", "Migrations from other platforms"] },
+  { name: "Max", price: "$40", cadence: "/month", features: ["100,000 rows per job", "Everything in Pro"] },
+  { name: "Enterprise", price: "$150", cadence: "/month", features: ["Unlimited rows", "Everything in Max", "Priority support"] },
 ];
 
 function PlanCard({ plan }) {
-  const paid = Boolean(plan?.paid);
+  const currentName = plan?.planName ?? "Basic";
   const openPlans = () => window.open(plan.url, "_top");
 
   return (
-    <Card heading="Plan" description="Your subscription. Billing is handled by Shopify.">
-      <s-stack direction="block" gap="small-200">
-        <s-text>
-          Current plan: <s-text type="strong">{plan?.planName ?? "Basic"}</s-text>
-        </s-text>
+    <Card heading="Plan" description="Pick a plan below — billing is handled by Shopify, and the plan page opens in the admin.">
+      <div style={planGrid}>
         {PLAN_TIERS.map((t) => {
-          const current = t.name === plan?.planName;
+          const isCurrent = t.name === currentName;
           return (
-            <div key={t.name} style={{ ...planRow, ...(current ? planRowActive : null) }}>
-              <s-text type={current ? "strong" : undefined}>{t.name}</s-text>
-              <s-text color="subdued">{t.price}</s-text>
-              <s-text color="subdued">{t.rows}</s-text>
-              <s-text color="subdued">{t.extras}</s-text>
-            </div>
+            <s-box key={t.name} padding="base" borderWidth="base" borderRadius="base" background="base">
+              <s-stack direction="block" gap="base">
+                <s-stack direction="inline" gap="small-300" alignItems="center">
+                  <s-heading>{t.name}</s-heading>
+                  {t.popular && <s-badge tone="success">Popular</s-badge>}
+                  {isCurrent && <s-badge>Current</s-badge>}
+                </s-stack>
+                <s-stack direction="inline" gap="small-100" alignItems="baseline">
+                  <s-heading>{t.price}</s-heading>
+                  {t.cadence && <s-text color="subdued">{t.cadence}</s-text>}
+                </s-stack>
+                <s-stack direction="block" gap="small-300">
+                  {t.features.map((f) => (
+                    <s-stack key={f} direction="inline" gap="small-300" alignItems="start">
+                      <s-icon type="check" tone="success" />
+                      {/* minWidth: 0 lets long labels wrap beside the icon instead of dropping below it */}
+                      <div style={{ flex: 1, minWidth: 0 }}><s-text>{f}</s-text></div>
+                    </s-stack>
+                  ))}
+                </s-stack>
+                <s-button variant="primary" disabled={isCurrent || undefined} onClick={openPlans}>
+                  {isCurrent ? "Current plan" : t.name === "Basic" ? "Downgrade to Basic" : `Choose ${t.name}`}
+                </s-button>
+              </s-stack>
+            </s-box>
           );
         })}
-      </s-stack>
-      <s-divider />
-      <s-stack direction="inline" gap="small" alignItems="center">
-        <s-button variant="primary" onClick={openPlans}>{paid ? "Manage plan" : "Upgrade"}</s-button>
-        <s-text color="subdued">Opens the Shopify plan page.</s-text>
-      </s-stack>
+      </div>
     </Card>
   );
 }
@@ -547,11 +561,9 @@ function AboutCard({ appInfo }) {
 
 // ─── styles ──────────────────────────────────────────────────────────────────
 
-const planRow = {
-  display: "grid", gridTemplateColumns: "110px 100px 170px 1fr", gap: ".5rem",
-  padding: ".45rem .6rem", borderRadius: 8, alignItems: "center",
+const planGrid = {
+  display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: "1rem", alignItems: "stretch",
 };
-const planRowActive = { background: "#eefaf8", border: "1px solid #0d9488" };
 
 const layout = {
   display: "grid", gridTemplateColumns: "minmax(160px, 220px) 1fr", gap: "1rem", alignItems: "start",
