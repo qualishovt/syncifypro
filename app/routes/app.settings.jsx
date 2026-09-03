@@ -69,7 +69,7 @@ const IMPORT_MODE_LABELS = {
 // The one-line current-value shown under each menu item.
 function summaryFor(key, settings, scopes, plan) {
   switch (key) {
-    case "defaults":      return `${settings.defaultExportFormat.toUpperCase()} · ${IMPORT_MODE_LABELS[settings.defaultImportMode] ?? "Normal"}`;
+    case "defaults":      return `${FORMAT_CHOICES.find((f) => f.value === settings.defaultExportFormat)?.label ?? settings.defaultExportFormat} · ${IMPORT_MODE_LABELS[settings.defaultImportMode] ?? "Normal"}`;
     case "timezone":      return settings.timezone;
     case "notifications": return settings.notifyOnSuccess || settings.notifyOnError ? "On" : "Off";
     case "permissions": {
