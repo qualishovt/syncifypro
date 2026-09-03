@@ -512,15 +512,18 @@ function PlanCard({ plan }) {
           return (
             <s-box key={t.name} padding="base" borderWidth="base" borderRadius="base" background="base">
               <s-stack direction="block" gap="base">
-                <s-stack direction="inline" gap="small-300" alignItems="center">
-                  <s-heading>{t.name}</s-heading>
-                  {t.popular && <s-badge tone="success">Popular</s-badge>}
-                  {isCurrent && <s-badge>Current</s-badge>}
-                </s-stack>
-                <s-stack direction="inline" gap="small-100" alignItems="baseline">
-                  <s-heading>{t.price}</s-heading>
-                  {t.cadence && <s-text color="subdued">{t.cadence}</s-text>}
-                </s-stack>
+                {/* Header: name + badges on the left, price on the right. */}
+                <div style={planHeader}>
+                  <s-stack direction="inline" gap="small-300" alignItems="center">
+                    <s-heading>{t.name}</s-heading>
+                    {t.popular && <s-badge tone="success">Popular</s-badge>}
+                    {isCurrent && <s-badge>Current</s-badge>}
+                  </s-stack>
+                  <s-stack direction="inline" gap="small-100" alignItems="baseline">
+                    <s-heading>{t.price}</s-heading>
+                    {t.cadence && <s-text color="subdued">{t.cadence}</s-text>}
+                  </s-stack>
+                </div>
                 <s-stack direction="block" gap="small-300">
                   {t.features.map((f) => (
                     <s-stack key={f} direction="inline" gap="small-300" alignItems="start">
@@ -561,6 +564,9 @@ function AboutCard({ appInfo }) {
 
 // ─── styles ──────────────────────────────────────────────────────────────────
 
+const planHeader = {
+  display: "flex", justifyContent: "space-between", alignItems: "center", gap: ".5rem", flexWrap: "nowrap",
+};
 const planGrid = {
   display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "1rem", alignItems: "stretch",
 };
