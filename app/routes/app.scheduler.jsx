@@ -69,24 +69,15 @@ const DESTINATIONS = [
 // ─── Loader ────────────────────────────────────────────────────────────────────
 
 export async function loader({ request }) {
-  const { admin, session } = await authenticate.admin(request);
+  const { session } = await authenticate.admin(request);
   const sched = await import("../db/schedule.server.js");
-
-  // The store's own timezone — the default for new schedules, so "08:00"
-  // means 08:00 where the merchant is.
-  let shopTimezone = "UTC";
-  try {
-    const res = await admin.graphql(`{ shop { ianaTimezone } }`);
-    const body = await res.json();
-    shopTimezone = body?.data?.shop?.ianaTimezone || "UTC";
-  } catch {
-    // leave UTC
-  }
   const { listPresets } = await import("../db/exportPreset.server.js");
   const { listImportPresets } = await import("../db/importPreset.server.js");
   const { getAppSettings } = await import("../db/appSettings.server.js");
   const google = await import("../schedules/google.server.js");
-  const { blockedEntities } = await getAppSettings(session.shop);
+  // The app's Settings → Time zone is the default for new schedules, so
+  // "08:00" means 08:00 on the clock the merchant chose there.
+  const { blockedEntities, timezone: shopTimezone } = await getAppSettings(session.shop);
 
   const schedules = (await sched.listSchedules(session.shop)).map((s) => serializeSchedule(s, sched));
   const history = (await sched.listScheduleRuns(session.shop, 100)).map((h) => ({
@@ -109,7 +100,7 @@ export async function loader({ request }) {
     schedules, history, presets, importPresets, servers,
     blockedEntities: blockedEntities ?? [],
     shop: session.shop,
-    shopTimezone,
+    shopTimezone: shopTimezone || "UTC",
     google: {
       configured: google.googleConfigured(),
       connected: Boolean(conn?.refreshToken),
