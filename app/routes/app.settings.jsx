@@ -17,6 +17,7 @@ import { useFetcher, useLoaderData } from "react-router";
 import { authenticate } from "../shopify.server.js";
 import PolarisSelect from "../components/PolarisSelect.jsx";
 import PolarisCheckbox from "../components/PolarisCheckbox.jsx";
+import { timezoneChoices, timezoneLabel } from "../utils/timezones.js";
 
 // ─── options ─────────────────────────────────────────────────────────────────
 
@@ -37,13 +38,6 @@ const IMPORT_MODE_CHOICES = [
   { value: "dryRun", label: "Dry run — validate, write nothing" },
 ];
 // A curated set of common IANA zones (JS Intl handles the offset/DST math).
-const TIMEZONE_CHOICES = [
-  "UTC", "America/Los_Angeles", "America/Denver", "America/Chicago", "America/New_York",
-  "America/Sao_Paulo", "Europe/London", "Europe/Paris", "Europe/Berlin", "Europe/Moscow",
-  "Asia/Dubai", "Asia/Baku", "Asia/Kolkata", "Asia/Shanghai", "Asia/Tokyo",
-  "Australia/Sydney", "Pacific/Auckland",
-];
-
 // Left menu grouped into categories (distinct from Matrixify's flat list), with
 // our own section names. Each item shows its current value as a subtitle.
 const MENU_GROUPS = [
@@ -369,10 +363,10 @@ function TimezoneCard({ settings }) {
   const save = () => fetcher.submit({ intent: "saveTimezone", timezone: tz }, { method: "post" });
 
   return (
-    <Card heading="Time zone" description="Job and schedule times across the app are displayed in this zone. Schedules are still evaluated in UTC, so the time you set for a schedule is entered in UTC.">
+    <Card heading="Time zone" description="Job times across the app are displayed in this zone. Each schedule has its own timezone (defaulting to your store's), and its run time is read in that zone.">
       <div style={{ maxWidth: 340 }}>
         <PolarisSelect label="Display time zone" value={tz} onChange={setTz} disabled={saving}>
-          {TIMEZONE_CHOICES.map((z) => <s-option key={z} value={z}>{z.replace(/_/g, " ")}</s-option>)}
+          {timezoneChoices(tz).map((z) => <s-option key={z} value={z}>{timezoneLabel(z)}</s-option>)}
         </PolarisSelect>
       </div>
       <SaveRow onSave={save} saving={saving} saved={fetcher.data?.saved === "saveTimezone" && !saving} disabled={!dirty} />

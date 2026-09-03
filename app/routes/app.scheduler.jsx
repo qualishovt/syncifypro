@@ -22,6 +22,7 @@ import PolarisSelect from "../components/PolarisSelect.jsx";
 import PolarisTextField from "../components/PolarisTextField.jsx";
 import PolarisCheckbox from "../components/PolarisCheckbox.jsx";
 import FormatIcon from "../components/FormatIcon.jsx";
+import { timezoneChoices, timezoneLabel } from "../utils/timezones.js";
 
 // Exportable entities offered for scheduling — the SAME list as the Export
 // page, so anything exportable is schedulable (Sheet Permissions still hides
@@ -1088,12 +1089,16 @@ export default function SchedulerPage() {
                   onChange={(v) => set({ minute: v })}
                 />
               )}
-              <PolarisTextField
+              {/* Hour/Minute above are read in this zone; defaults to the store's. */}
+              <PolarisSelect
                 label="Timezone"
-                placeholder="IANA name, e.g. Europe/London"
                 value={form.timezone}
                 onChange={(v) => set({ timezone: v })}
-              />
+              >
+                {timezoneChoices(form.timezone).map((z) => (
+                  <s-option key={z} value={z}>{timezoneLabel(z)}</s-option>
+                ))}
+              </PolarisSelect>
             </s-grid>
 
             {/* ── Delivery destinations (exports only — imports READ data, they
