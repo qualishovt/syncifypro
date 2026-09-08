@@ -164,3 +164,21 @@ test("full round-trip: export rows → CSV → parse → normalize → validate 
   assert.equal(input.title, "Tee");
   assert.equal(input.metafields[0].key, "care");
 });
+
+test("Shopify CSV: variant rows without Option names take them from the top row", () => {
+  // Shopify's own export writes "Option1 Name" only on the first row of a
+  // product; the variant rows beneath carry just the values. Without the
+  // fallback those variants had no optionName and productSet rejected the
+  // whole product ("optionValues ... Expected value to not be null").
+  const { input } = buildProductSetInput([
+    { handle: "tee", title: "Tee", option1_name: "Size", option1_value: "S", option2_name: "Color", option2_value: "Black", sku: "T-S-B", price: "20.00" },
+    { handle: "tee", option1_value: "S", option2_value: "White", sku: "T-S-W", price: "21.00" },
+    { handle: "tee", option1_value: "M", option2_value: "Black", sku: "T-M-B", price: "20.00" },
+    { handle: "tee", image_url: "https://cdn.example.com/tee-2.png" },
+  ]);
+  assert.equal(input.variants.length, 3);
+  assert.deepEqual(input.variants[1].optionValues, [{ optionName: "Size", name: "S" }, { optionName: "Color", name: "White" }]);
+  assert.deepEqual(input.variants[2].optionValues, [{ optionName: "Size", name: "M" }, { optionName: "Color", name: "Black" }]);
+  assert.deepEqual(input.productOptions.map((o) => o.name), ["Size", "Color"]);
+  assert.deepEqual(input.productOptions[1].values.map((v) => v.name), ["Black", "White"]);
+});

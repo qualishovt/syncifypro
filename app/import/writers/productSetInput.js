@@ -84,10 +84,21 @@ export function isVariantRow(row) {
     clean(row.option1_value) || clean(row.barcode));
 }
 
-function buildVariant(row) {
+/**
+ * Option names for a group: from the top row. Shopify's own CSV export (and
+ * Matrixify-style files) write "Option1 Name" only on a product's first row
+ * and leave it blank on the variant rows beneath, so a variant row falls back
+ * to these — otherwise its optionValues would lack a name and productSet
+ * rejects the whole product ("optionValues … Expected value to not be null").
+ */
+function optionNamesOf(top) {
+  return [1, 2, 3].map((i) => clean(top?.[`option${i}_name`]));
+}
+
+function buildVariant(row, groupOptionNames = []) {
   const optionValues = [];
   for (let i = 1; i <= 3; i++) {
-    const name = clean(row[`option${i}_name`]);
+    const name = clean(row[`option${i}_name`]) || groupOptionNames[i - 1];
     const value = clean(row[`option${i}_value`]);
     if (name && value) optionValues.push({ optionName: name, name: value });
   }
@@ -187,7 +198,8 @@ export function buildProductSetInput(group) {
   if (clean(top.category_id)) input.category = toGid("TaxonomyCategory", top.category_id);
 
   const options = buildOptions(group);
-  const variants = group.filter(isVariantRow).map(buildVariant).filter((v) => Object.keys(v).length);
+  const optionNames = optionNamesOf(top);
+  const variants = group.filter(isVariantRow).map((r) => buildVariant(r, optionNames)).filter((v) => Object.keys(v).length);
 
   // A single-variant product with no Option columns (WooCommerce "simple"
   // products, hand-written sheets) still needs option values — productSet
