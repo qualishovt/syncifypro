@@ -740,6 +740,17 @@ function ImportPage() {
     return () => clearInterval(interval);
   }, [pollingJobId, job?.status, pollFetcher]);
 
+  // The Duration fact reads the clock at render time, and the poll above only
+  // re-renders every 2s — so the counter jumped 2s at a time. Tick once a
+  // second while the run is live so it counts like a stopwatch.
+  const [, setClock] = useState(0);
+  useEffect(() => {
+    if (!pollingJobId) return;
+    if (job?.status === "complete" || job?.status === "failed" || job?.status === "cancelled") return;
+    const tick = setInterval(() => setClock((n) => n + 1), 1000);
+    return () => clearInterval(tick);
+  }, [pollingJobId, job?.status]);
+
   function submit(mode, planArg) {
     const fd = new FormData();
     fd.set("mode", mode);
