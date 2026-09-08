@@ -524,8 +524,8 @@ export default function Home() {
                           ? (
                             <span style={fileList}>
                               {j.files.map((f, i) => (
-                                // PDFs open in a viewer tab; other formats download in place.
-                                <s-link key={i} href={f.url} target={/\.pdf$/i.test(f.name) ? "_blank" : undefined}>{f.name}</s-link>
+                                // target=_blank: file links are same-origin (/files/:token), and App Bridge would otherwise client-route them. PDFs open in the new tab; other formats download and the tab closes.
+                                <s-link key={i} href={f.url} target="_blank">{f.name}</s-link>
                               ))}
                             </span>
                           )

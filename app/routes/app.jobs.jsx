@@ -298,7 +298,7 @@ export default function JobsPage() {
                       {j.files.length ? (
                         <s-stack direction="block" gap="small-500">
                           {j.files.map((f, i) => (
-                            <s-link key={i} href={f.url} target={/\.pdf$/i.test(f.name) ? "_blank" : undefined}>{f.name}</s-link>
+                            <s-link key={i} href={f.url} target="_blank">{f.name}</s-link>
                           ))}
                         </s-stack>
                       ) : <s-text color="subdued">—</s-text>}

@@ -897,7 +897,7 @@ function ImportPage() {
       {/* Finished: the results workbook is the primary action; "Import again"
           reopens the same staged file with a fresh preview. */}
       {finished && job.status === "complete" && job.resultUrl && (
-        <s-button slot="primary-action" variant="primary" icon="download" href={job.resultUrl}>
+        <s-button slot="primary-action" variant="primary" icon="download" href={job.resultUrl} target="_blank">
           Download results
         </s-button>
       )}
@@ -958,7 +958,7 @@ function ImportPage() {
               title bar's primary action, like the export's Download). */}
           {job.resultUrl && (
             <div style={{ marginTop: ".4rem" }}>
-              <s-button variant="secondary" icon="download" href={job.resultUrl}>Download results</s-button>
+              <s-button variant="secondary" icon="download" href={job.resultUrl} target="_blank">Download results</s-button>
             </div>
           )}
 
@@ -1109,7 +1109,7 @@ function ImportPage() {
       {finished && job.status === "complete" && failedFetcher.data?.failedRowsUrl && (
         <s-banner tone="info" dismissible>
           {failedFetcher.data.failedRowsCount} failed row(s) ready —{" "}
-          <s-link href={failedFetcher.data.failedRowsUrl}>download the fix-and-retry file</s-link>.
+          <s-link href={failedFetcher.data.failedRowsUrl} target="_blank">download the fix-and-retry file</s-link>.
         </s-banner>
       )}
       {finished && job.status === "complete" && failedFetcher.data?.error && (
@@ -1234,7 +1234,7 @@ function ImportPage() {
                     <Fact label="Import file" span={preRun ? undefined : 2} style={{ minWidth: 0 }}>
                       <span style={fileValueRow} title={fileName}>
                         <span style={fileNameCell}>
-                          {fileUrl && preview ? <s-link href={fileUrl}>{fileName}</s-link> : fileName}
+                          {fileUrl && preview ? <s-link href={fileUrl} target="_blank">{fileName}</s-link> : fileName}
                         </span>
                         {fileSize != null && <span style={{ ...mutedValue, flex: "none" }}>&nbsp;· {humanSize(fileSize)}</span>}
                       </span>

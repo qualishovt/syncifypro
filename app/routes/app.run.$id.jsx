@@ -549,7 +549,7 @@ export default function JobPage() {
         <s-button
           slot="primary-action" icon="download"
           href={mainFile.url}
-          target={/\.pdf$/i.test(mainFile.name) ? "_blank" : undefined}
+          target="_blank"
         >
           Download
         </s-button>
@@ -628,13 +628,13 @@ export default function JobPage() {
             </span>
           </span>
 
-          {/* PDFs open in a viewer tab; other formats download in place. */}
+          {/* target=_blank: file links are same-origin (/files/:token), and App Bridge would otherwise client-route them. PDFs open in the new tab; other formats download and the tab closes. */}
           <div style={{ marginTop: ".4rem" }}>
             <s-button
               variant="primary"
               icon="download"
               href={mainFile.url}
-              target={/\.pdf$/i.test(mainFile.name) ? "_blank" : undefined}
+              target="_blank"
             >
               Download
             </s-button>
@@ -789,7 +789,7 @@ export default function JobPage() {
                   variant={f.main ? "primary" : "secondary"}
                   icon="download"
                   href={f.url}
-                  target={/\.pdf$/i.test(f.name) ? "_blank" : undefined}
+                  target="_blank"
                 >
                   Download
                 </s-button>
