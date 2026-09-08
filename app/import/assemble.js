@@ -14,9 +14,23 @@
  * entity-specific.
  *
  * Splitting rule: a new record begins at the first row and at every row whose
- * `top_row` is truthy. If NO row in the file has a truthy `top_row` (e.g. a
- * flat single-row entity like redirects, or a hand-authored file that omits
- * the column), every row is its own record.
+ * `top_row` is truthy. If NO row in the file has a truthy `top_row` (a flat
+ * single-row entity like redirects, a hand-authored file, or Shopify's own
+ * CSV export), rows are grouped by identity instead: the record's identifier
+ * column is whichever of id / handle / email / name / … its first row fills,
+ * and a following row continues the record when that column holds the same
+ * value, or is empty AND the row is a child row — one that carries no
+ * record-level field (Title, Command): the variant and image rows under a
+ * product in Shopify's CSV, or Matrixify-style child rows. A row with an
+ * empty identifier but a Title/Command is a new record (a "create" row after
+ * an "update" row). Rows that carry no identifier at all stay one record
+ * each, so a plain "create these" file still works — but their own child
+ * rows (no identifier, no Title/Command) still attach to them.
+ *
+ * Without this, a Shopify CSV's three image rows for one handle became three
+ * concurrent productSet calls on the same product (each replacing its media
+ * with a single image), and Shopify rejected most of them with "This product
+ * is currently being modified".
  */
 
 const TRUTHY = new Set(["true", "1", "yes", "y", "x"]);
@@ -24,6 +38,23 @@ const TRUTHY = new Set(["true", "1", "yes", "y", "x"]);
 /** Interpret an export/import boolean-ish cell ("TRUE", "true", "1", "x"). */
 export function isTruthy(value) {
   return TRUTHY.has(String(value ?? "").trim().toLowerCase());
+}
+
+// Identifier columns in precedence order (union across entities: products/
+// collections use handle, customers email, orders name, redirects path, …).
+const IDENTITY_KEYS = ["id", "handle", "email", "name", "path", "code"];
+
+// Filling one of these marks a row as a record of its own even when its
+// identifier column is empty (a "create" row below an "update" row).
+const RECORD_KEYS = ["command", "title"];
+
+const norm = (v) => String(v ?? "").trim().toLowerCase();
+const startsRecord = (row) => RECORD_KEYS.some((k) => norm(row?.[k]) !== "");
+
+/** The first identifier column a row fills, or null when it carries none. */
+function identityKeyOf(row) {
+  for (const k of IDENTITY_KEYS) if (norm(row?.[k]) !== "") return k;
+  return null;
 }
 
 /**
@@ -38,7 +69,7 @@ export function groupRecords(rows, { topRowKey = "top_row" } = {}) {
   if (rows.length === 0) return [];
 
   const hasTopRow = rows.some((r) => isTruthy(r[topRowKey]));
-  if (!hasTopRow) return rows.map((r) => [r]); // flat / single-row entity
+  if (!hasTopRow) return groupByIdentity(rows);
 
   const groups = [];
   let current = null;
@@ -46,6 +77,26 @@ export function groupRecords(rows, { topRowKey = "top_row" } = {}) {
     if (current === null || isTruthy(row[topRowKey])) {
       current = [];
       groups.push(current);
+    }
+    current.push(row);
+  }
+  return groups;
+}
+
+function groupByIdentity(rows) {
+  const groups = [];
+  let current = null;
+  let key = null;   // the open record's identifier column …
+  let value = "";   // … and its value
+  for (const row of rows) {
+    const cell = key ? norm(row[key]) : "";
+    const child = !startsRecord(row) && (key ? cell === "" : identityKeyOf(row) === null);
+    const continues = current !== null && ((key !== null && cell === value) || child);
+    if (!continues) {
+      current = [];
+      groups.push(current);
+      key = identityKeyOf(row);
+      value = key ? norm(row[key]) : "";
     }
     current.push(row);
   }

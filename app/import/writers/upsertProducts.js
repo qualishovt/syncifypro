@@ -99,6 +99,25 @@ export async function upsertProducts(rows, admin, { onProgress, options = {} } =
   return result;
 }
 
+// Shopify serialises writes per product: a productSet that lands while another
+// mutation on the same product is in flight fails with "This product is
+// currently being modified. Please try again later." — a transient lock, not
+// a data problem. Retry those (and throttling) with a short backoff.
+const TRANSIENT_RE = /currently being modified|try again later|throttl|too many requests/i;
+const RETRY_DELAYS_MS = [1500, 3000, 6000, 10000];
+
+async function productSetWithRetry(admin, variables) {
+  let payload;
+  for (let attempt = 0; ; attempt++) {
+    const res = await admin.graphql(PRODUCT_SET, { variables });
+    payload = (await res.json())?.data?.productSet;
+    const errs = payload?.userErrors ?? [];
+    const transient = errs.length > 0 && errs.every((e) => TRANSIENT_RE.test(String(e.message || "")));
+    if (!transient || attempt >= RETRY_DELAYS_MS.length) return payload;
+    await sleep(RETRY_DELAYS_MS[attempt]);
+  }
+}
+
 async function writeGroup(group, ctx, result) {
   const admin = ctx.admin;
   let built;
@@ -136,8 +155,7 @@ async function writeGroup(group, ctx, result) {
     if (ctx.createRedirects && identifier?.id && input.handle) {
       priorHandle = await fetchHandle(identifier.id, admin);
     }
-    const res = await admin.graphql(PRODUCT_SET, { variables: { input, identifier } });
-    const payload = (await res.json())?.data?.productSet;
+    const payload = await productSetWithRetry(admin, { input, identifier });
     const errs = payload?.userErrors ?? [];
     if (errs.length) { result.errors.push({ title: label, userErrors: errs }); return { status: "failed", comment: msgs(errs) }; }
 

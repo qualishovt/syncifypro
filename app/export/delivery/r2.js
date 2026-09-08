@@ -1,8 +1,11 @@
 /**
  * export/delivery/r2.js
  *
- * Uploads an export file buffer to Cloudflare R2 (S3-compatible)
- * and returns a pre-signed URL that expires after a set duration.
+ * Uploads an export file buffer to Cloudflare R2 (S3-compatible) and returns
+ * an expiring download link. The link is on the APP's domain (/files/:token,
+ * see utils/fileToken.server.js) — not an R2 pre-signed URL — because some
+ * networks reset connections to *.r2.cloudflarestorage.com and the browser
+ * then showed an error page instead of a download (App Store review, 2026-09).
  *
  * Uses @aws-sdk/client-s3 + @aws-sdk/s3-request-presigner —
  * both work against R2 by pointing at R2's S3-compatible endpoint.
@@ -24,10 +27,22 @@ import {
   DeleteObjectCommand,
   HeadObjectCommand,
 } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { signFileToken } from "../../utils/fileToken.server.js";
 
-/** Signed URL expiry in seconds — 1 hour */
+/** Download link expiry in seconds — 1 hour */
 const SIGNED_URL_EXPIRY_SECONDS = 60 * 60;
+
+/**
+ * Expiring download link on the app's own origin for a stored object.
+ * PDFs are served inline (browser viewer); everything else downloads.
+ */
+function appDownloadUrl(r2Key, filename) {
+  const base = String(process.env.SHOPIFY_APP_URL || "").replace(/\/+$/, "");
+  const expiresAt = new Date(Date.now() + SIGNED_URL_EXPIRY_SECONDS * 1000);
+  const disposition = /\.pdf$/i.test(filename) ? "inline" : "attachment";
+  const token = signFileToken({ key: r2Key, filename, disposition, expiresAt });
+  return { signedUrl: `${base}/files/${token}`, expiresAt };
+}
 
 const R2_ERROR_CODES = new Set([
   "AccessDenied", "NoSuchBucket", "InvalidAccessKeyId", "SignatureDoesNotMatch",
@@ -120,24 +135,8 @@ export async function uploadToR2({ buffer, filename, mimeType, shopId }) {
     throw new Error(describeR2Error(err, bucket) ?? `R2 upload failed: ${err.message}`);
   }
 
-  // 2. Generate pre-signed GET URL. PDFs are served inline so the browser
-  //    opens them in a viewer tab; every other format forces a download.
-  //    ResponseContentDisposition MUST live on the GetObjectCommand input —
-  //    in getSignedUrl's options it is silently ignored, and browsers then
-  //    render viewable types (XML!) instead of downloading them.
-  const disposition = /\.pdf$/i.test(filename) ? "inline" : "attachment";
-  const signedUrl = await getSignedUrl(
-    client,
-    new GetObjectCommand({
-      Bucket: bucket,
-      Key:    r2Key,
-      ResponseContentDisposition: `${disposition}; filename="${filename}"`,
-    }),
-    { expiresIn: SIGNED_URL_EXPIRY_SECONDS },
-  );
-
-  const expiresAt = new Date(Date.now() + SIGNED_URL_EXPIRY_SECONDS * 1000);
-
+  // 2. Mint the download link (app domain; streams from R2 server-side).
+  const { signedUrl, expiresAt } = appDownloadUrl(r2Key, filename);
   return { signedUrl, r2Key, expiresAt };
 }
 
@@ -195,21 +194,27 @@ export async function downloadFromR2(r2Key) {
  * @returns {Promise<{ signedUrl: string, expiresAt: Date }>}
  */
 export async function signDownloadUrl(r2Key, filename) {
+  return appDownloadUrl(r2Key, filename);
+}
+
+/**
+ * Open a stored object for streaming (the /files/:token route). Returns the
+ * body as a web ReadableStream plus the metadata needed for response headers.
+ *
+ * @param {string} r2Key
+ * @returns {Promise<{ body: ReadableStream, contentType: string|undefined, contentLength: number|undefined }>}
+ */
+export async function openR2Object(r2Key) {
   const bucket = process.env.R2_BUCKET_NAME;
   if (!bucket) throw new Error("R2_BUCKET_NAME is not set");
   const client = getR2Client();
-  const disposition = /\.pdf$/i.test(filename) ? "inline" : "attachment";
-  // Disposition on the command input, not the options — see uploadToR2.
-  const signedUrl = await getSignedUrl(
-    client,
-    new GetObjectCommand({
-      Bucket: bucket,
-      Key:    r2Key,
-      ResponseContentDisposition: `${disposition}; filename="${filename}"`,
-    }),
-    { expiresIn: SIGNED_URL_EXPIRY_SECONDS },
-  );
-  return { signedUrl, expiresAt: new Date(Date.now() + SIGNED_URL_EXPIRY_SECONDS * 1000) };
+  try {
+    const res = await client.send(new GetObjectCommand({ Bucket: bucket, Key: r2Key }));
+    const body = typeof res.Body?.transformToWebStream === "function" ? res.Body.transformToWebStream() : res.Body;
+    return { body, contentType: res.ContentType, contentLength: res.ContentLength };
+  } catch (err) {
+    throw new Error(describeR2Error(err, bucket) ?? `R2 read failed: ${err.message}`);
+  }
 }
 
 /**
