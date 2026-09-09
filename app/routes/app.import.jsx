@@ -736,6 +736,11 @@ function ImportPage() {
   // Back from re-running apply.
   useEffect(() => {
     if (d?.mode === "apply" && d.jobId) {
+      // Arm the finishing hold from the moment WE start a run: a small file can
+      // be done inside the first 2s poll, and then no render ever sees it
+      // unfinished. Opening an older run from Recent activity doesn't come
+      // through here, so it still lands straight on its result.
+      wasRunningRef.current = true;
       setPollingJobId(d.jobId);
       navigate(`/app/import?jobId=${encodeURIComponent(d.jobId)}`, { replace: true });
     }
