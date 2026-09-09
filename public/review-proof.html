@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>SyncifyPro — proof of resolution (App Store review, Sep 2026)</title>
+<style>
+  :root { --ink:#1a1c1e; --muted:#5c6166; --line:#e3e6e8; --accent:#0d9488; --bg:#fbfbfa; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
+  main { max-width:920px; margin:0 auto; padding:2.5rem 1.25rem 4rem; }
+  h1 { font-size:1.6rem; line-height:1.3; margin:0 0 .25rem; }
+  .sub { color:var(--muted); margin:0 0 2rem; }
+  h2 { font-size:1.15rem; margin:2.5rem 0 .5rem; padding-top:1.5rem; border-top:1px solid var(--line); }
+  h3 { font-size:1rem; margin:1.5rem 0 .35rem; }
+  p { margin:.5rem 0; }
+  .quote { margin:.75rem 0 1.25rem; padding:.75rem 1rem; background:#fff; border-left:3px solid var(--accent);
+           color:var(--muted); font-style:italic; }
+  video, img { width:100%; border:1px solid var(--line); border-radius:8px; background:#fff; display:block; }
+  figure { margin:1.25rem 0; }
+  figcaption { color:var(--muted); font-size:.875rem; margin-top:.5rem; }
+  ol { padding-left:1.25rem; }
+  li { margin:.35rem 0; }
+  code { background:#fff; border:1px solid var(--line); border-radius:4px; padding:.1rem .35rem; font-size:.9em; }
+  a { color:var(--accent); }
+  .fixed { display:inline-block; background:#e7f6f4; color:#0b6f66; border:1px solid #b8e3de;
+           border-radius:999px; padding:.1rem .6rem; font-size:.8rem; font-weight:600; vertical-align:middle; }
+  footer { margin-top:3rem; padding-top:1.25rem; border-top:1px solid var(--line); color:var(--muted); font-size:.875rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>SyncifyPro — proof of resolution</h1>
+  <p class="sub">App Store review feedback of 8 September 2026 (requirement 2.1.1). Both reported problems are fixed and live in production.</p>
+
+  <p>The reviewer reported:</p>
+  <p class="quote">The import is failing to complete the complete files and also when trying to download or open the file a message "connection was reset" is shown, this also happens when trying to download the exported file.</p>
+
+  <h2>1. "Connection was reset" when downloading a file <span class="fixed">Fixed</span></h2>
+  <p><strong>Cause.</strong> Every download link pointed straight at the app's object storage on <code>*.r2.cloudflarestorage.com</code>. That host is reachable from most networks but was reset on the review environment's network, so the embedded app showed the browser's error page instead of a file.</p>
+  <p><strong>Change.</strong> Files are now served by the app itself, from its own domain: <code>https://app.syncifypro.app/files/&lt;token&gt;</code>. The token is signed and expires after one hour, exactly like the storage link it replaces; the app streams the file server-side and sets the download filename. No third-party host is involved in a download any more. This covers every file the app hands out: export results, uploaded import files and import result workbooks.</p>
+
+  <h2>2. Import not completing on a Shopify-format product CSV <span class="fixed">Fixed</span></h2>
+  <p><strong>Cause.</strong> Shopify's own <em>Products → Export</em> CSV writes one row per variant and per image, repeating the product handle and leaving most columns blank on those extra rows. The importer treated each row as a separate product, so the rows belonging to one product were written concurrently and Shopify rejected most of them with "This product is currently being modified. Please try again later." A second defect in the same file layout: option names appear only on a product's first row, so variants on the following rows were sent without an option name and Shopify rejected the product.</p>
+  <p><strong>Change.</strong> When a file has no explicit record marker, rows are now grouped into one record per product (matching handle or ID, plus rows that carry no identifier of their own), variant rows inherit the option names from their product's first row, and a write that hits Shopify's transient product lock is retried with backoff.</p>
+
+  <h2>Recording of the fixed flow</h2>
+  <p>One minute, production app, real store. A Shopify-format product CSV is imported from a URL, the file is analysed, imported, and the results workbook is downloaded — the step that previously failed.</p>
+  <figure>
+    <video controls preload="metadata" poster="/review-proof/still-finished.png">
+      <source src="/review-proof/import-download-fix.mp4" type="video/mp4">
+      Your browser cannot play this video. <a href="/review-proof/import-download-fix.mp4">Download the MP4</a>.
+    </video>
+    <figcaption>Import from URL → 7 products detected in 79 rows → import completes with 0 failed → Download results saves the workbook.</figcaption>
+  </figure>
+
+  <h3>The same steps as stills</h3>
+  <figure>
+    <img src="/review-proof/still-analysis.png" alt="The import page showing the file analysed as 7 records across 79 rows, ready to import.">
+    <figcaption>The Shopify-format CSV is read as <strong>7 records from 79 rows</strong>. Before the fix this file produced 79 separate records, which is what made the import fail.</figcaption>
+  </figure>
+  <figure>
+    <img src="/review-proof/still-finished.png" alt="The import finished with 0 new, 7 updated, 0 deleted and 0 failed.">
+    <figcaption><strong>0 new · 7 updated · 0 deleted · 0 failed</strong>, in three seconds.</figcaption>
+  </figure>
+  <figure>
+    <img src="/review-proof/still-download.png" alt="Chrome's download list open over the app after clicking Download results.">
+    <figcaption>Clicking <strong>Download results</strong> saves the file and the app page stays intact — the browser's download list opens instead of an error page. The workbook from this run: <a href="/review-proof/import-results.xlsx">import-results.xlsx</a>.</figcaption>
+  </figure>
+
+  <h2>How to retest</h2>
+  <ol>
+    <li>In the Shopify admin, open <strong>Products → Export</strong> and export as plain CSV. (Or use this sample, which has the same layout: <a href="/samples/shopify-products-sample.csv">shopify-products-sample.csv</a>.)</li>
+    <li>Open SyncifyPro, drop that file on <strong>Import</strong> (or paste the sample's URL into <em>Direct URL</em> and press <strong>Import from URL</strong>).</li>
+    <li>Check the analysis: the row count stays as in the file, while <em>Records</em> shows one per product.</li>
+    <li>Press <strong>Import</strong>. It finishes with 0 failed.</li>
+    <li>Press <strong>Download results</strong>. The workbook downloads from <code>app.syncifypro.app</code>.</li>
+    <li>Press <strong>Import again</strong> and repeat — the second run also finishes with 0 failed.</li>
+    <li>Any export works the same way: <strong>Export</strong> → pick Products → <strong>Export</strong> → <strong>Download</strong>.</li>
+  </ol>
+
+  <footer>
+    SyncifyPro · verified on the production app at <a href="https://app.syncifypro.app">app.syncifypro.app</a> on 9 September 2026 ·
+    questions: <a href="mailto:support@syncifypro.app">support@syncifypro.app</a>
+  </footer>
+</main>
+</body>
+</html>
