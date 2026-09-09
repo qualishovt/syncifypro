@@ -47,7 +47,7 @@
   <p><strong>Change.</strong> When a file has no explicit record marker, rows are now grouped into one record per product (matching handle or ID, plus rows that carry no identifier of their own), variant rows inherit the option names from their product's first row, and a write that hits Shopify's transient product lock is retried with backoff.</p>
 
   <h2>Recording of the fixed flow</h2>
-  <p>Fifty seconds, production app, real store. A Shopify-format product CSV is imported from a URL, the file is analysed, imported, and the results workbook is downloaded — the step that previously failed.</p>
+  <p>Thirty seconds, production app, real store. A Shopify-format product CSV is imported from a URL, the file is analysed, imported, and the results workbook is downloaded — the step that previously failed.</p>
   <figure>
     <video controls preload="metadata" poster="/review-proof/still-finished.png">
       <source src="/review-proof/import-download-fix.mp4" type="video/mp4">
