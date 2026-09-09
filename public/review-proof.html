@@ -47,7 +47,7 @@
   <p><strong>Change.</strong> When a file has no explicit record marker, rows are now grouped into one record per product (matching handle or ID, plus rows that carry no identifier of their own), variant rows inherit the option names from their product's first row, and a write that hits Shopify's transient product lock is retried with backoff.</p>
 
   <h2>Recording of the fixed flow</h2>
-  <p>One minute, production app, real store. A Shopify-format product CSV is imported from a URL, the file is analysed, imported, and the results workbook is downloaded — the step that previously failed.</p>
+  <p>Fifty seconds, production app, real store. A Shopify-format product CSV is imported from a URL, the file is analysed, imported, and the results workbook is downloaded — the step that previously failed.</p>
   <figure>
     <video controls preload="metadata" poster="/review-proof/still-finished.png">
       <source src="/review-proof/import-download-fix.mp4" type="video/mp4">
@@ -66,8 +66,8 @@
     <figcaption><strong>0 new · 7 updated · 0 deleted · 0 failed</strong>, in three seconds.</figcaption>
   </figure>
   <figure>
-    <img src="/review-proof/still-download.png" alt="Chrome's download list open over the app after clicking Download results.">
-    <figcaption>Clicking <strong>Download results</strong> saves the file and the app page stays intact — the browser's download list opens instead of an error page. The workbook from this run: <a href="/review-proof/import-results.xlsx">import-results.xlsx</a>.</figcaption>
+    <img src="/review-proof/still-download.png" alt="The browser's download notification showing the results workbook saved, over the app page after clicking Download results.">
+    <figcaption>Clicking <strong>Download results</strong> saves the file and the app page stays intact — the browser reports the download as done instead of showing an error page. The workbook from this run: <a href="/review-proof/import-results.xlsx">import-results.xlsx</a>.</figcaption>
   </figure>
 
   <h2>How to retest</h2>
