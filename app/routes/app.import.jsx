@@ -688,6 +688,28 @@ function ImportPage() {
 
   const job = pollFetcher.data?.job ?? initialJob ?? null;
   const finished = job && (job.status === "complete" || job.status === "failed" || job.status === "cancelled");
+
+  // The poll samples every 2s, so completion almost always lands while the bar
+  // is mid-glide (or before it has moved at all — a 7-record file is done in
+  // three seconds). Hold the progress view for a beat so the bar visibly
+  // sweeps to 100% BEFORE the result banner replaces it. Entered DURING
+  // RENDER (guarded set-state), not in an effect: an effect runs after paint,
+  // which lets the banner flash for one frame first. Same pattern as the run
+  // page.
+  const [finishing, setFinishing] = useState(false);
+  const wasRunningRef = useRef(false);
+  if (wasRunningRef.current && finished && job.status === "complete" && !finishing) {
+    wasRunningRef.current = false; // consume the transition — enter the hold once
+    setFinishing(true);
+  }
+  useEffect(() => {
+    if (job && !finished) wasRunningRef.current = true;
+  }, [job, finished]);
+  useEffect(() => {
+    if (!finishing) return undefined;
+    const t = setTimeout(() => setFinishing(false), 1100);
+    return () => clearTimeout(t);
+  }, [finishing]);
   // A job is in flight or has just landed on this page → the Import buttons
   // and submit bar hide (the result banner offers the next actions), while
   // the Sheets/Options cards stay visible throughout.
@@ -907,12 +929,12 @@ function ImportPage() {
       </span>
       {/* Finished: the results workbook is the primary action; "Import again"
           reopens the same staged file with a fresh preview. */}
-      {finished && job.status === "complete" && job.resultUrl && (
+      {finished && !finishing && job.status === "complete" && job.resultUrl && (
         <s-button slot="primary-action" variant="primary" icon="download" href={job.resultUrl} target="_blank">
           Download results
         </s-button>
       )}
-      {finished && src && (
+      {finished && !finishing && src && (
         <s-button
           slot="secondary-actions"
           variant="secondary"
@@ -947,7 +969,7 @@ function ImportPage() {
           page's "Your file is ready"): outcome + counts + the next actions.
           Placement matters: as a direct child of s-page it gets the
           prominent title-bar look; inside a section it renders flat. ─── */}
-      {finished && job.status === "complete" && (
+      {finished && !finishing && job.status === "complete" && (
         <s-banner
           tone={job.failed > 0 ? "warning" : "success"}
           heading={job.failed > 0
@@ -1142,15 +1164,17 @@ function ImportPage() {
           // placeholders — the same shell-then-fill the export page does.
           const preRun = !pollingJobId;
           const status = preRun ? null : (job?.status ?? "pending");
-          const cur = job?.progressCurrent ?? 0;
           const tot = preRun ? (preview?.totals?.importableRecords ?? null) : (job?.progressTotal ?? null);
-          const pct = !preRun && tot ? Math.min(100, Math.round((cur / tot) * 100)) : null;
-          const runningNow = !preRun && !finished;
+          // During the finishing hold the bar reads full, whatever the last
+          // poll caught.
+          const cur = finishing && tot != null ? tot : (job?.progressCurrent ?? 0);
+          const pct = !preRun && tot ? Math.min(100, Math.round((cur / tot) * 100)) : (finishing ? 100 : null);
+          const runningNow = !preRun && (!finished || finishing);
           const ready = (preview?.totals?.importable ?? 0) > 0;
           // Pulse only for a RUNNING job with no countable total; while
           // queued the bar sits empty so it never moves backwards when the
           // first real percentage arrives.
-          const indeterminate = status === "running" && tot == null;
+          const indeterminate = status === "running" && tot == null && !finishing;
           const fmt = preview?.format ?? job?.format ?? "";
           return (
             <s-section>
@@ -1176,7 +1200,7 @@ function ImportPage() {
                 {runningNow && (
                   <s-stack direction="block" gap="small-300">
                     <s-text>
-                      {status === "running" ? "Importing" : "Queued"}
+                      {finishing ? "Imported" : status === "running" ? "Importing" : "Queued"}
                       {pct != null ? ` ${pct}%` : "…"}
                       {pct != null && tot > 0 ? ` — ${cur.toLocaleString()} of ${tot.toLocaleString()} records` : ""}
                     </s-text>
@@ -1195,10 +1219,10 @@ function ImportPage() {
                 )}
 
                 {/* Outcome banners (in-section = flat variant) */}
-                {finished && status === "failed" && (
+                {finished && !finishing && status === "failed" && (
                   <s-banner tone="critical">{job.errorMessage || "The import failed."}</s-banner>
                 )}
-                {finished && status === "cancelled" && (
+                {finished && !finishing && status === "cancelled" && (
                   <s-banner tone="warning">This import was cancelled. Rows already written before the cancel stay applied.</s-banner>
                 )}
 
@@ -1874,7 +1898,7 @@ function ImportPage() {
         /* Progress bar — the run page's; a short ease so each update snaps
            forward promptly rather than dragging behind the next poll. */
         .jp-track { height: 6px; border-radius: 3px; background: #e3e5e7; overflow: hidden; position: relative; }
-        .jp-fill { height: 100%; border-radius: 3px; background: #1a1a1a; transition: width .35s ease-out; }
+        .jp-fill { height: 100%; border-radius: 3px; background: #1a1a1a; transition: width .6s ease-out; }
         .jp-pulse { position: absolute; inset: 0; width: 40%; border-radius: 3px; background: #1a1a1a; animation: jp-indeterminate 1.4s infinite linear; }
         @keyframes jp-indeterminate { 0% { transform: translateX(-120%); } 100% { transform: translateX(320%); } }
       `}</style>
