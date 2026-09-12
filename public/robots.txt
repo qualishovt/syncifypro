@@ -1,0 +1,14 @@
+# syncifypro.app — marketing site.
+# The embedded Shopify app, auth callbacks and signed file links are not
+# public pages: they need a session, so crawling them only wastes budget.
+
+User-agent: *
+Allow: /
+Disallow: /app/
+Disallow: /auth/
+Disallow: /files/
+Disallow: /webhooks/
+Disallow: /qrcodes/
+Disallow: /review-proof
+
+Sitemap: https://syncifypro.app/sitemap.xml
