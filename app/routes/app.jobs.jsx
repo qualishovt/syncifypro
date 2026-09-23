@@ -272,10 +272,16 @@ export default function JobsPage() {
             <s-table-body>
               {jobs.map((j) => {
                 const running = j.status === "running" || j.status === "pending";
+                // clickDelegate points the whole row at its job link: Polaris
+                // then tints the row on hover (its own bg-surface-hover) and
+                // shows a pointer. Clicks that start on an interactive child
+                // (the buttons below, any s-link) are ignored by the delegate,
+                // so the row actions keep working.
+                const linkId = `job-link-${j.type}-${j.id}`;
                 return (
-                  <s-table-row key={`${j.type}-${j.id}`}>
+                  <s-table-row key={`${j.type}-${j.id}`} clickDelegate={linkId}>
                     <s-table-cell>
-                      <s-link href={j.href ?? `/app/run/${j.id}`}>
+                      <s-link id={linkId} href={j.href ?? `/app/run/${j.id}`}>
                         {j.number ?? "—"}
                       </s-link>
                     </s-table-cell>
