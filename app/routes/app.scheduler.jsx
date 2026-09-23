@@ -201,10 +201,31 @@ export async function action({ request }) {
       if (type === "export") {
         patch.filename = String(fd.get("filenameTemplate") || "").trim() || null;
         patch.splitRows = parseSplit(fd.get("splitRows"));
-        if (fd.get("hasSpec") !== "true") {
+        const presetId = String(fd.get("presetId") || "");
+        if (presetId) {
+          // Re-point the schedule at a preset: the same snapshot the create
+          // path takes, replacing whatever configuration it ran before.
+          const { getPreset } = await import("../db/exportPreset.server.js");
+          const p = await getPreset(shop, presetId);
+          if (!p) return data({ error: "That preset is no longer available." }, { status: 400 });
+          let entity = "";
+          try { entity = JSON.parse(p.spec).map((x) => x.entity).join(","); } catch { /* ignore */ }
+          let popts = {};
+          try { popts = p.options ? JSON.parse(p.options) ?? {} : {}; } catch { /* ignore */ }
+          patch.format = p.format;
+          patch.entity = entity;
+          patch.spec = p.spec;
+          patch.options = p.options ?? null;
+          patch.splitRows = p.splitRows ?? null;
+          patch.filename = popts.filename ?? null;
+        } else if (fd.get("hasSpec") !== "true") {
           const entities = fd.getAll("entity").map(String).filter(Boolean);
           if (!entities.length) return data({ error: "Pick at least one entity." }, { status: 400 });
           patch.entity = entities.join(",");
+          // Dropping a preset for plain entities: the old spec must go too,
+          // or it would keep driving the run.
+          patch.spec = null;
+          patch.options = null;
         }
       }
       if (type === "import") {
@@ -421,7 +442,7 @@ const BLANK = {
   type: "export",
   name: "",
   hasSpec: false,
-  configSource: "entities", // "entities" | "preset"
+  configSource: "entities", // "entities" | "preset" | "keep" (edit: leave the stored spec alone)
   presetId: "",
   entities: [],
   sourceServerId: "", // "" = Direct URL
@@ -537,6 +558,9 @@ export default function SchedulerPage() {
       type: s.type,
       name: s.name,
       hasSpec: s.hasSpec,
+      // A schedule running a preset's spec opens on "keep"; one running a
+      // plain entity list opens on its chips.
+      configSource: s.hasSpec ? "keep" : "entities",
       ...splitSourceUrl(s.sourceUrl || "", servers),
       onlyNewFiles: s.onlyNewFiles ?? true,
       filenameTemplate: s.type === "export" ? (s.filename || "") : "",
@@ -609,7 +633,9 @@ export default function SchedulerPage() {
     fd.set("id", form.id);
     fd.set("type", form.type);
     fd.set("name", form.name);
-    fd.set("hasSpec", String(form.hasSpec));
+    // "keep" is the only case where the server must leave the stored spec
+    // alone; entities and presets both replace it.
+    fd.set("hasSpec", String(form.configSource === "keep"));
     fd.set("format", form.format);
     fd.set("frequency", form.frequency);
     fd.set("hour", form.hour);
@@ -623,7 +649,7 @@ export default function SchedulerPage() {
       fd.set("filenameTemplate", form.filenameTemplate.trim());
       fd.set("splitRows", form.splitRows.trim());
       if (usingPreset) fd.set("presetId", form.presetId);
-      else form.entities.forEach((e) => fd.append("entity", e));
+      else if (form.configSource !== "keep") form.entities.forEach((e) => fd.append("entity", e));
     } else {
       fd.set("sourceUrl", effectiveSourceUrl.trim());
       fd.set("onlyNewFiles", String(form.onlyNewFiles));
@@ -656,7 +682,7 @@ export default function SchedulerPage() {
   const toggleEntity = (e) =>
     set({ entities: form.entities.includes(e) ? form.entities.filter((x) => x !== e) : [...form.entities, e] });
 
-  const usingPreset = !editing && form.type === "export" && form.configSource === "preset" && presets.length > 0;
+  const usingPreset = form.type === "export" && form.configSource === "preset" && presets.length > 0;
   const sourceServer = servers.find((s) => s.id === form.sourceServerId) ?? null;
   // Saved servers usable as delivery targets, per destination tab.
   const ftpServers = servers.filter((s) => ["ftp", "ftps", "sftp"].includes(s.protocol));
@@ -669,7 +695,7 @@ export default function SchedulerPage() {
   const effectiveSourceUrl = buildRemoteUrl(sourceServer, form.sourcePath);
   const sourceUrlOk = parseImportUrl(effectiveSourceUrl).ok;
   const canSave = form.type === "export"
-    ? (usingPreset ? Boolean(form.presetId) : (form.hasSpec || form.entities.length > 0))
+    ? (usingPreset ? Boolean(form.presetId) : (form.configSource === "keep" || form.entities.length > 0))
     : (editing ? (!effectiveSourceUrl.trim() || sourceUrlOk) : sourceUrlOk);
   const googleNeeded = form.driveOn || form.sheetsOn;
   const destEnabled = {
@@ -873,18 +899,20 @@ export default function SchedulerPage() {
 
             {/* Configuration — the twin of the import section's select: one
                 dropdown holding the default plus every saved preset, so both
-                schedule types are configured the same way. Only offered while
-                creating: an existing export schedule keeps the spec it was
-                given. */}
-            {form.type === "export" && !editing && presets.length > 0 && (
+                schedule types are configured the same way. While editing, a
+                schedule that already runs a preset's spec also offers to keep
+                it: the spec is stored on the schedule, not linked to the
+                preset, so there is nothing to re-select it by. */}
+            {form.type === "export" && (presets.length > 0 || form.hasSpec) && (
               <div style={{ maxWidth: 420 }}>
                 <PolarisSelect
                   label="Configuration"
-                  value={usingPreset ? form.presetId : "entities"}
-                  onChange={(v) => (v === "entities"
-                    ? set({ configSource: "entities", presetId: "" })
+                  value={usingPreset ? form.presetId : form.configSource === "keep" ? "keep" : "entities"}
+                  onChange={(v) => (v === "entities" || v === "keep"
+                    ? set({ configSource: v, presetId: "" })
                     : set({ configSource: "preset", presetId: v }))}
                 >
+                  {form.hasSpec && <s-option value="keep">Current configuration (unchanged)</s-option>}
                   <s-option value="entities">Entities (all fields)</s-option>
                   {presets.map((p) => (
                     <s-option key={p.id} value={p.id}>
@@ -899,7 +927,7 @@ export default function SchedulerPage() {
             )}
 
             {form.type === "export" && (
-              usingPreset ? null : form.hasSpec ? (
+              usingPreset ? null : form.configSource === "keep" ? (
                 <s-text color="subdued">
                   This schedule runs a saved preset&rsquo;s configuration (entities, filters and columns are preserved).
                 </s-text>
