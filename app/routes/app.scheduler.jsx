@@ -518,7 +518,7 @@ export default function SchedulerPage() {
   }, [actionData, navigation.state]);
 
   const openNew = () => {
-    setForm({ ...BLANK, presetId: presets[0]?.id ?? "", timezone: shopTimezone || "UTC" });
+    setForm({ ...BLANK, timezone: shopTimezone || "UTC" });
     setTab("schedules");
     setShowForm(true);
   };
@@ -868,30 +868,38 @@ export default function SchedulerPage() {
                     Import
                   </s-button>
                 </s-stack>
-                {form.type === "export" && presets.length > 0 && (
-                  <div style={{ maxWidth: 300 }}>
-                    <PolarisSelect label="Configuration" value={form.configSource} onChange={(v) => set({ configSource: v })}>
-                      <s-option value="entities">Entities (all fields)</s-option>
-                      <s-option value="preset">Saved preset</s-option>
-                    </PolarisSelect>
-                  </div>
-                )}
               </>
             )}
 
+            {/* Configuration — the twin of the import section's select: one
+                dropdown holding the default plus every saved preset, so both
+                schedule types are configured the same way. Only offered while
+                creating: an existing export schedule keeps the spec it was
+                given. */}
+            {form.type === "export" && !editing && presets.length > 0 && (
+              <div style={{ maxWidth: 420 }}>
+                <PolarisSelect
+                  label="Configuration"
+                  value={usingPreset ? form.presetId : "entities"}
+                  onChange={(v) => (v === "entities"
+                    ? set({ configSource: "entities", presetId: "" })
+                    : set({ configSource: "preset", presetId: v }))}
+                >
+                  <s-option value="entities">Entities (all fields)</s-option>
+                  {presets.map((p) => (
+                    <s-option key={p.id} value={p.id}>
+                      Preset: {p.name} ({String(p.format).toUpperCase()})
+                    </s-option>
+                  ))}
+                </PolarisSelect>
+                <s-text color="subdued">
+                  A preset runs its own entities, filters and columns. Save presets on the Export page.
+                </s-text>
+              </div>
+            )}
+
             {form.type === "export" && (
-              usingPreset ? (
-                <div style={{ maxWidth: 420 }}>
-                  <PolarisSelect label="Preset" value={form.presetId} onChange={(v) => set({ presetId: v })}>
-                    {presets.map((p) => (
-                      <s-option key={p.id} value={p.id}>
-                        {p.name} ({String(p.format).toUpperCase()})
-                      </s-option>
-                    ))}
-                  </PolarisSelect>
-                  <s-text color="subdued">Runs the preset&rsquo;s entities, filters and columns. Save presets on the Export page.</s-text>
-                </div>
-              ) : form.hasSpec ? (
+              usingPreset ? null : form.hasSpec ? (
                 <s-text color="subdued">
                   This schedule runs a saved preset&rsquo;s configuration (entities, filters and columns are preserved).
                 </s-text>
@@ -1018,17 +1026,22 @@ export default function SchedulerPage() {
                     URL above to switch it to fetching fresh data each run.
                   </s-text>
                 )}
-                <div style={{ maxWidth: 420 }}>
-                  <PolarisSelect label="Import setup" value={form.importPresetId} onChange={(v) => set({ importPresetId: v })}>
-                    <s-option value="">Auto-detect from the file</s-option>
-                    {importPresets.map((p) => (
-                      <s-option key={p.id} value={p.id}>Preset: {p.name}</s-option>
-                    ))}
-                  </PolarisSelect>
-                </div>
-                <s-text color="subdued">
-                  The setup is the per-sheet plan (entity, filters, columns) and import mode. Save presets on the Import page.
-                </s-text>
+                {importPresets.length > 0 && (
+                  <>
+                    <div style={{ maxWidth: 420 }}>
+                      <PolarisSelect label="Configuration" value={form.importPresetId} onChange={(v) => set({ importPresetId: v })}>
+                        <s-option value="">Auto-detect from the file</s-option>
+                        {importPresets.map((p) => (
+                          <s-option key={p.id} value={p.id}>Preset: {p.name}</s-option>
+                        ))}
+                      </PolarisSelect>
+                    </div>
+                    <s-text color="subdued">
+                      A preset runs its own per-sheet plan (entity, filters, columns) and import mode.
+                      Save presets on the Import page.
+                    </s-text>
+                  </>
+                )}
               </s-stack>
             )}
 
