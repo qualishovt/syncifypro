@@ -29,11 +29,11 @@ async function startBoss() {
 
   // Register the worker. Handler receives a batch (default size 1).
   await boss.work(EXPORT_QUEUE, async ([job]) => {
-    const { jobId, specs, format, shop, splitRows, options } = job.data;
+    const { jobId, specs, format, shop, options } = job.data;
     // Dynamic import breaks the exportJob ↔ queue import cycle.
     const { runExportForJob } = await import("../export/exportJob.js");
     const { admin } = await unauthenticated.admin(shop);
-    await runExportForJob({ admin, shop, jobId, specs, format, splitRows, options: options ?? {} });
+    await runExportForJob({ admin, shop, jobId, specs, format, options: options ?? {} });
   });
 
   return boss;

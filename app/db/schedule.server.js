@@ -193,7 +193,6 @@ async function startScheduleJob(sch) {
     const res = await startExport({
       admin, shop: sch.shop, specs,
       format: sch.format || "csv",
-      splitRows: sch.splitRows ?? null,
       options,
     });
     return { jobType: "export", jobId: res.jobId };

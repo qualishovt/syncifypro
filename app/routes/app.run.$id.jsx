@@ -109,7 +109,7 @@ export async function loader({ request, params }) {
       // options), shown read-only on this page like Matrixify/Altera do.
       ...(() => {
         if (kind !== "export" || !j.spec) return { sheets: null, options: null };
-        const { specs, options, splitRows } = parseJobSpec(j.spec);
+        const { specs, options } = parseJobSpec(j.spec);
         return {
           sheets: specs?.map((s) => ({
             entity: s.entity,
@@ -118,7 +118,7 @@ export async function loader({ request, params }) {
             advancedFilters: s.advancedFilters ?? [],
             sort: s.sort ?? null,
           })) ?? null,
-          options: { ...(options ?? {}), splitRows: splitRows ?? null },
+          options: options ?? {},
         };
       })(),
     },
@@ -160,7 +160,6 @@ export async function action({ request, params }) {
         shop: session.shop,
         specs,
         format: payload.format || "csv",
-        splitRows: payload.splitRows ?? null,
         options: payload.options ?? {},
         jobId: id,
       });
@@ -187,7 +186,6 @@ export async function action({ request, params }) {
             entity: specs.map((x) => x.entity).join(","),
             format: payload.format || "csv",
             spec: JSON.stringify(specs),
-            splitRows: payload.splitRows ?? null,
             options: payload.options ? JSON.stringify(payload.options) : null,
             filename: payload.options?.filename ?? null,
             timezone: timezone || "UTC",
@@ -228,7 +226,7 @@ export async function action({ request, params }) {
         const parsed = parseJobSpec(job.spec);
         const specs = parsed.specs
           ?? [{ entity: job.entity, filters: {}, fields: job.fields ? job.fields.split(",") : undefined }];
-        const res = await startExport({ admin, shop: session.shop, specs, format: job.format, options: parsed.options, splitRows: parsed.splitRows });
+        const res = await startExport({ admin, shop: session.shop, specs, format: job.format, options: parsed.options });
         return { ok: true, goto: `/app/run/${res.jobId}` };
       }
       const { getImportJob, createImportJob } = await import("../db/bulkImportJob.server.js");
@@ -511,7 +509,7 @@ export default function JobPage() {
               />
             )}
             <AdvancedCard
-              options={{ ...(startPayload.options ?? {}), splitRows: startPayload.splitRows ?? null }}
+              options={startPayload.options ?? {}}
               open={advOpen}
               onToggle={() => setAdvOpen((o) => !o)}
             />
@@ -1027,7 +1025,6 @@ function AdvancedCard({ options, open, onToggle }) {
           <s-text color="subdued">
             {[
               options.filename && `File name: ${options.filename}`,
-              options.splitRows && `Split: ${Number(options.splitRows).toLocaleString()}`,
               options.zip && "ZIP",
               options.skipEmpty && "Skip when empty",
               options.excelDates && "Excel dates",
@@ -1059,12 +1056,6 @@ function AdvancedCard({ options, open, onToggle }) {
             <SharedTextField
               label="File name time source"
               value={options.filenameTimeSource === "finished" ? "Finished At" : "Started At (default)"}
-              disabled
-            />
-            <SharedTextField
-              label="Split into files of N records"
-              placeholder="Off — one file"
-              value={options.splitRows ? String(options.splitRows) : ""}
               disabled
             />
             <PolarisCheckbox

@@ -159,7 +159,7 @@ export async function action({ request }) {
         const parsed = parseJobSpec(job.spec);
         const specs = parsed.specs
           ?? [{ entity: job.entity, filters: {}, fields: job.fields ? job.fields.split(",") : undefined }];
-        const res = await startExport({ admin, shop: session.shop, specs, format: job.format, options: parsed.options, splitRows: parsed.splitRows });
+        const res = await startExport({ admin, shop: session.shop, specs, format: job.format, options: parsed.options });
         return { ok: true, goto: `/app/run/${res.jobId}` };
       }
       const { getImportJob, createImportJob } = await import("../db/bulkImportJob.server.js");

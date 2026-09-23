@@ -42,11 +42,6 @@ const FORMATS = [
   { value: "pdf", label: "PDF" }, { value: "csv_shopify", label: "Shopify CSV" },
 ];
 
-/** "" / garbage → null (one file); a positive integer → split size. */
-function parseSplit(raw) {
-  const n = parseInt(String(raw ?? ""), 10);
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
 const FREQUENCIES = [
   { value: "every15min", label: "Every 15 minutes" },
   { value: "every30min", label: "Every 30 minutes" },
@@ -122,7 +117,9 @@ function serializeSchedule(s, sched) {
     sourceUrl: s.sourceUrl || "",
     onlyNewFiles: s.onlyNewFiles ?? true,
     hasSpec: Boolean(s.spec),
-    splitRows: s.splitRows ?? null,
+    hasPlan: Boolean(s.plan),
+    // Display only: which preset this configuration was copied from.
+    presetId: s.presetId ?? null,
     task: sched.describeTask(s),
     destinations: sched.serializeDestinations(s),
     lastRunAt: s.lastRunAt ? s.lastRunAt.toISOString() : null,
@@ -200,7 +197,6 @@ export async function action({ request }) {
       const type = String(fd.get("type") || "export");
       if (type === "export") {
         patch.filename = String(fd.get("filenameTemplate") || "").trim() || null;
-        patch.splitRows = parseSplit(fd.get("splitRows"));
         const presetId = String(fd.get("presetId") || "");
         if (presetId) {
           // Re-point the schedule at a preset: the same snapshot the create
@@ -216,8 +212,8 @@ export async function action({ request }) {
           patch.entity = entity;
           patch.spec = p.spec;
           patch.options = p.options ?? null;
-          patch.splitRows = p.splitRows ?? null;
           patch.filename = popts.filename ?? null;
+          patch.presetId = p.id;
         } else if (fd.get("hasSpec") !== "true") {
           const entities = fd.getAll("entity").map(String).filter(Boolean);
           if (!entities.length) return data({ error: "Pick at least one entity." }, { status: 400 });
@@ -226,6 +222,7 @@ export async function action({ request }) {
           // or it would keep driving the run.
           patch.spec = null;
           patch.options = null;
+          patch.presetId = null;
         }
       }
       if (type === "import") {
@@ -238,13 +235,20 @@ export async function action({ request }) {
           patch.sourceUrl = parsed.url.toString();
           patch.filename = filenameFromUrl(parsed.url) || "import";
         }
+        // "keep" leaves the stored plan alone; "" drops it back to detecting
+        // the layout from each fetched file; an id re-snapshots that preset.
         const importPresetId = String(fd.get("importPresetId") || "");
-        if (importPresetId) {
+        if (importPresetId && importPresetId !== "keep") {
           const { getImportPreset } = await import("../db/importPreset.server.js");
           const p = await getImportPreset(shop, importPresetId);
           if (!p) return data({ error: "That import preset is no longer available." }, { status: 400 });
           patch.plan = p.plan;
           patch.options = p.options;
+          patch.presetId = p.id;
+        } else if (!importPresetId) {
+          patch.plan = null;
+          patch.options = null;
+          patch.presetId = null;
         }
       }
       const updated = await sched.updateSchedule(shop, id, patch);
@@ -257,7 +261,6 @@ export async function action({ request }) {
 
     if (type === "export") {
       const filename = String(fd.get("filenameTemplate") || "").trim() || null;
-      const splitRows = parseSplit(fd.get("splitRows"));
       const presetId = String(fd.get("presetId") || "");
       if (presetId) {
         const { getPreset } = await import("../db/exportPreset.server.js");
@@ -265,15 +268,15 @@ export async function action({ request }) {
         if (!p) return data({ error: "That preset is no longer available." }, { status: 400 });
         let entity = "";
         try { entity = JSON.parse(p.spec).map((x) => x.entity).join(","); } catch { /* ignore */ }
-        // The preset carries the split setting, the Advanced options AND the
-        // file name — all snapshotted onto the schedule, like the spec.
+        // The preset carries the Advanced options AND the file name — both
+        // snapshotted onto the schedule, like the spec.
         let popts = {};
         try { popts = p.options ? JSON.parse(p.options) ?? {} : {}; } catch { /* ignore */ }
         await sched.createSchedule({
           ...base, shop, type, format: p.format, entity, spec: p.spec,
           filename: popts.filename ?? null,
-          splitRows: p.splitRows ?? null,
           options: p.options ?? null,
+          presetId: p.id,
         });
         return { ok: true };
       }
@@ -284,7 +287,6 @@ export async function action({ request }) {
         format: String(fd.get("format") || "csv"),
         entity: entities.join(","),
         filename,
-        splitRows,
       });
       return { ok: true };
     }
@@ -314,7 +316,7 @@ export async function action({ request }) {
       filename,
       sourceUrl: parsed.url.toString(),
       onlyNewFiles: fd.get("onlyNewFiles") !== "false",
-      plan, options,
+      plan, options, presetId: importPresetId || null,
     });
     return { ok: true };
   } catch (err) {
@@ -442,7 +444,9 @@ const BLANK = {
   type: "export",
   name: "",
   hasSpec: false,
+  hasPlan: false,
   configSource: "entities", // "entities" | "preset" | "keep" (edit: leave the stored spec alone)
+  fromPresetId: "",    // the preset an edited schedule was built from, for its label
   presetId: "",
   entities: [],
   sourceServerId: "", // "" = Direct URL
@@ -450,7 +454,6 @@ const BLANK = {
   onlyNewFiles: true,
   importPresetId: "",
   filenameTemplate: "", // export delivery filename, {date} {time} {shop} {name}
-  splitRows: "",       // split export into files of N records
   format: "csv",
   frequency: "daily",
   hour: "8",
@@ -558,13 +561,16 @@ export default function SchedulerPage() {
       type: s.type,
       name: s.name,
       hasSpec: s.hasSpec,
+      hasPlan: s.hasPlan,
+      fromPresetId: s.presetId || "",
       // A schedule running a preset's spec opens on "keep"; one running a
       // plain entity list opens on its chips.
       configSource: s.hasSpec ? "keep" : "entities",
+      // An import keeps its stored plan unless the select is changed.
+      importPresetId: s.type === "import" && s.hasPlan ? "keep" : "",
       ...splitSourceUrl(s.sourceUrl || "", servers),
       onlyNewFiles: s.onlyNewFiles ?? true,
       filenameTemplate: s.type === "export" ? (s.filename || "") : "",
-      splitRows: s.splitRows != null ? String(s.splitRows) : "",
       entities: String(s.entity || "").split(",").map((x) => x.trim()).filter(Boolean),
       format: s.format,
       frequency: s.frequency,
@@ -647,7 +653,6 @@ export default function SchedulerPage() {
     fd.set("enabled", String(form.enabled));
     if (form.type === "export") {
       fd.set("filenameTemplate", form.filenameTemplate.trim());
-      fd.set("splitRows", form.splitRows.trim());
       if (usingPreset) fd.set("presetId", form.presetId);
       else if (form.configSource !== "keep") form.entities.forEach((e) => fd.append("entity", e));
     } else {
@@ -683,6 +688,13 @@ export default function SchedulerPage() {
     set({ entities: form.entities.includes(e) ? form.entities.filter((x) => x !== e) : [...form.entities, e] });
 
   const usingPreset = form.type === "export" && form.configSource === "preset" && presets.length > 0;
+  // The schedule stores a snapshot, not a live link, so "keep" names the
+  // preset it came from rather than claiming to follow it. A preset that has
+  // since been deleted leaves the generic wording.
+  const fromPreset = (form.type === "export" ? presets : importPresets).find((p) => p.id === form.fromPresetId);
+  const keepLabel = fromPreset
+    ? `Current configuration (from "${fromPreset.name}")`
+    : "Current configuration (unchanged)";
   const sourceServer = servers.find((s) => s.id === form.sourceServerId) ?? null;
   // Saved servers usable as delivery targets, per destination tab.
   const ftpServers = servers.filter((s) => ["ftp", "ftps", "sftp"].includes(s.protocol));
@@ -912,7 +924,7 @@ export default function SchedulerPage() {
                     ? set({ configSource: v, presetId: "" })
                     : set({ configSource: "preset", presetId: v }))}
                 >
-                  {form.hasSpec && <s-option value="keep">Current configuration (unchanged)</s-option>}
+                  {form.hasSpec && <s-option value="keep">{keepLabel}</s-option>}
                   <s-option value="entities">Entities (all fields)</s-option>
                   {presets.map((p) => (
                     <s-option key={p.id} value={p.id}>
@@ -1054,10 +1066,11 @@ export default function SchedulerPage() {
                     URL above to switch it to fetching fresh data each run.
                   </s-text>
                 )}
-                {importPresets.length > 0 && (
+                {(importPresets.length > 0 || (editing && form.hasPlan)) && (
                   <>
                     <div style={{ maxWidth: 420 }}>
                       <PolarisSelect label="Configuration" value={form.importPresetId} onChange={(v) => set({ importPresetId: v })}>
+                        {editing && form.hasPlan && <s-option value="keep">{keepLabel}</s-option>}
                         <s-option value="">Auto-detect from the file</s-option>
                         {importPresets.map((p) => (
                           <s-option key={p.id} value={p.id}>Preset: {p.name}</s-option>
@@ -1151,24 +1164,6 @@ export default function SchedulerPage() {
                 <s-text color="subdued">
                   Placeholders: {"{date}"}, {"{time}"}, {"{shop}"}, {"{name}"}. The format extension is
                   added automatically. Leave blank for &ldquo;name-date&rdquo;.
-                </s-text>
-              </>
-            )}
-            {/* A saved preset already carries the split setting — asking again
-                here would either duplicate or contradict it. */}
-            {!usingPreset && (
-              <>
-                <div style={{ maxWidth: 420 }}>
-                  <PolarisTextField
-                    label="Split into files of N records (optional)"
-                    placeholder="e.g. 5000 — leave blank for one file"
-                    value={form.splitRows}
-                    onChange={(v) => set({ splitRows: v })}
-                  />
-                </div>
-                <s-text color="subdued">
-                  Splitting delivers a zip of numbered parts; a record that spans several rows
-                  (products, orders) is never cut in half.
                 </s-text>
               </>
             )}

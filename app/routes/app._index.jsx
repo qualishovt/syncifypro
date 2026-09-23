@@ -154,7 +154,7 @@ async function repeatExport(admin, shop, jobId) {
   const parsed = parseJobSpec(job.spec);
   const specs = parsed.specs
     ?? [{ entity: job.entity, filters: {}, fields: job.fields ? job.fields.split(",") : undefined }];
-  const res = await startExport({ admin, shop, specs, format: job.format, options: parsed.options, splitRows: parsed.splitRows });
+  const res = await startExport({ admin, shop, specs, format: job.format, options: parsed.options });
   return redirect(`/app/run/${res.jobId}`);
 }
 

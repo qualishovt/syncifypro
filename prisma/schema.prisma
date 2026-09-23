@@ -182,8 +182,10 @@ model Schedule {
   // Delivery destinations JSON: { email, ftp, gdrive, gsheets, s3 } each
   // { enabled, ...config }. Secrets inside are encrypted (crypto.server.js).
   destinations String?
-  // Export schedules: split the run into files of N records (null = one file).
-  splitRows    Int?
+  // The preset this schedule's configuration was taken from, for display only:
+  // spec/plan above are a SNAPSHOT, so editing the preset never changes what
+  // the schedule runs, and a deleted preset just leaves this dangling.
+  presetId     String?
   lastRunAt   DateTime?
   nextRunAt   DateTime?
   createdAt   DateTime  @default(now())
@@ -201,7 +203,6 @@ model ExportPreset {
   format    String   @default("csv")
   spec      String   // JSON: [{ entity, filters, fields, advancedFilters }]
   state     String?  // JSON: the export UI's entityState, for restoring the form
-  splitRows Int?     // split into files of N records (null = one file)
   options   String?  // JSON: the Advanced-section options (filename, zip, formatting, csv …)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

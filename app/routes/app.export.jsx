@@ -555,7 +555,6 @@ export async function loader({ request }) {
         duplicateExport = {
           format: dupJob.format,
           spec: parsed.specs,
-          splitRows: parsed.splitRows ?? null,
           options: parsed.options ?? null,
         };
       }
@@ -607,7 +606,7 @@ function serializePreset(p) {
   try { spec = JSON.parse(p.spec); } catch { /* ignore */ }
   let options = null;
   try { options = p.options ? JSON.parse(p.options) : null; } catch { /* ignore */ }
-  return { id: p.id, name: p.name, format: p.format, entityState: state, spec, splitRows: p.splitRows ?? null, options };
+  return { id: p.id, name: p.name, format: p.format, entityState: state, spec, options };
 }
 
 // ─── Action ───────────────────────────────────────────────────────────────────
@@ -630,12 +629,10 @@ export async function action({ request }) {
     let spec = [], state = null;
     try { spec = JSON.parse(String(formData.get("spec") || "[]")); } catch { /* ignore */ }
     try { state = formData.get("state") ? JSON.parse(String(formData.get("state"))) : null; } catch { /* ignore */ }
-    const splitParsed = parseInt(String(formData.get("splitRows") || ""), 10);
-    const splitRows = Number.isInteger(splitParsed) && splitParsed > 0 ? splitParsed : null;
     let options = null;
     try { options = formData.get("options") ? JSON.parse(String(formData.get("options"))) : null; } catch { /* ignore */ }
-    const p = await savePreset({ shop: session.shop, name, format, spec, state, splitRows, options });
-    return { presetSaved: true, preset: { id: p.id, name: p.name, format: p.format, entityState: state, spec, splitRows, options } };
+    const p = await savePreset({ shop: session.shop, name, format, spec, state, options });
+    return { presetSaved: true, preset: { id: p.id, name: p.name, format: p.format, entityState: state, spec, options } };
   }
   // Deferred "Schedule on": create a schedule from the current configuration
   // WITHOUT running an export now. First run at the given wall-clock time in
@@ -671,7 +668,6 @@ export async function action({ request }) {
         entity: specs.map((x) => x.entity).join(","),
         format: String(payload.format || "csv"),
         spec: JSON.stringify(specs),
-        splitRows: payload.splitRows ?? null,
         options: payload.options ? JSON.stringify(payload.options) : null,
         filename: payload.options?.filename ?? null,
         timezone: tz,
@@ -727,8 +723,6 @@ export async function action({ request }) {
   try {
     // Every export runs as a tracked job now (in-process for direct-size,
     // Shopify bulk for huge stores) so the UI can poll for progress.
-    const splitRaw = parseInt(String(formData.get("splitRows") ?? ""), 10);
-    const splitRows = Number.isFinite(splitRaw) && splitRaw > 0 ? splitRaw : null;
     // Advanced options: custom file name, skip-when-empty, force zip,
     // post-run delivery to a saved server and/or email.
     const options = {
@@ -741,7 +735,7 @@ export async function action({ request }) {
     // Per-plan row cap; it rides in options so the worker enforces it wherever
     // the job actually runs. null rowLimit (Enterprise) means uncapped.
     const cappedOptions = plan.rowLimit ? { ...options, maxRows: plan.rowLimit } : options;
-    return await startExport({ admin, shop: session.shop, specs, format, splitRows, options: cappedOptions });
+    return await startExport({ admin, shop: session.shop, specs, format, options: cappedOptions });
   } catch (err) {
     return data({ error: err.message }, { status: 500 });
   }
@@ -902,7 +896,6 @@ export default function ExportPage() {
     if (r.format) setFormat(r.format);
     setEntityState(stateFromSpec(r.specs ?? []));
     const o = r.options ?? {};
-    setSplitRows(o.splitRows ? String(o.splitRows) : "");
     applyAdvancedOptions(o);
     setPreset("Latest Export");
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -922,7 +915,6 @@ export default function ExportPage() {
   const dynGroupsFor = (entity) => (entity === "products" ? productDynamicGroups : EMPTY_DYN_GROUPS);
 
   const [format, setFormat] = useState(loaderData.defaultFormat ?? "excel");
-  const [splitRows, setSplitRows] = useState("");
   // Advanced options card (collapsed by default).
   const [advOpen, setAdvOpen] = useState(false);
   const [advFilename, setAdvFilename] = useState("");
@@ -1040,7 +1032,6 @@ export default function ExportPage() {
     dupApplied.current = true;
     setFormat(dup.format);
     setEntityState(normalizeStateSorts(stateFromSpec(dup.spec)));
-    setSplitRows(dup.splitRows != null ? String(dup.splitRows) : "");
     applyAdvancedOptions(dup.options ?? {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaderData.duplicateExport]);
@@ -1205,7 +1196,6 @@ export default function ExportPage() {
       if (p) {
         setFormat(p.format);
         setEntityState(normalizeStateSorts(p.entityState));
-        setSplitRows(p.splitRows != null ? String(p.splitRows) : "");
         // Full restore — a preset without stored options resets to defaults.
         applyAdvancedOptions(p.options ?? {});
       }
@@ -1262,14 +1252,12 @@ export default function ExportPage() {
         intent: "savePreset", name, format,
         spec: JSON.stringify(spec),
         state: JSON.stringify(entityState),
-        splitRows: splitRows.trim(),
         options: JSON.stringify(options),
       },
       { method: "post" },
     );
     setSavedPresets((prev) => [...prev.filter((p) => p.name !== name), {
       name, format, entityState, spec, options,
-      splitRows: parseInt(splitRows.trim(), 10) > 0 ? parseInt(splitRows.trim(), 10) : null,
     }]);
     setPreset(name);
     setPresetName("");
@@ -1347,7 +1335,6 @@ export default function ExportPage() {
     // the repeat, if set) and let the Schedules page take it from there.
     // A missing date comes back as a validation error from the action.
     if (schedOnEnabled) {
-      const splitParsed = parseInt(splitRows.trim(), 10);
       // Ad-hoc URL credentials must never persist on a schedule row.
       const schedOptions = buildAdvancedOptions();
       delete schedOptions.deliverUrl;
@@ -1356,7 +1343,6 @@ export default function ExportPage() {
         payload: JSON.stringify({
           format,
           specs: buildSpecs(),
-          splitRows: Number.isFinite(splitParsed) && splitParsed > 0 ? splitParsed : null,
           options: schedOptions,
           schedule: {
             date: schedOnDate.trim(),
@@ -1381,13 +1367,11 @@ export default function ExportPage() {
     // The payload rides in history state; the job page creates the job from
     // there — this page never waits on the server.
     const jobId = crypto.randomUUID();
-    const splitRaw = parseInt(splitRows.trim(), 10);
     navigate(`/app/run/${jobId}`, {
       state: {
         start: {
           format,
           specs: buildSpecs(),
-          splitRows: Number.isFinite(splitRaw) && splitRaw > 0 ? splitRaw : null,
           options: buildAdvancedOptions(),
           // Scheduling lives entirely behind the "Run on a schedule" switch,
           // which defers via createInlineSchedule — plain exports carry none.
@@ -1994,20 +1978,6 @@ export default function ExportPage() {
                     ]}
                     disabled={isExporting}
                   />
-                  {/* A big export becomes a zip of numbered parts; multi-row
-                      records (products/orders) never straddle a part. */}
-                  <div style={fieldHelpWrap}>
-                    <SharedTextField
-                      label="Split into files of N records"
-                      placeholder="e.g. 5000 — blank for one file"
-                      value={splitRows}
-                      onChange={setSplitRows}
-                      disabled={isExporting}
-                    />
-                    <s-text color="subdued">
-                      Splitting delivers a zip of numbered parts, each with its own header row.
-                    </s-text>
-                  </div>
                   <PolarisCheckbox
                     label="Compress export file into a ZIP archive"
                     checked={advZip}

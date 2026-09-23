@@ -171,17 +171,16 @@ export async function getJob(id) {
  * Always returns { specs, options }.
  */
 export function parseJobSpec(raw) {
-  if (!raw) return { specs: null, options: {}, splitRows: null };
+  if (!raw) return { specs: null, options: {} };
   try {
     const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) return { specs: parsed, options: {}, splitRows: null };
+    if (Array.isArray(parsed)) return { specs: parsed, options: {} };
     return {
       specs: parsed.specs ?? null,
       options: parsed.options ?? {},
-      splitRows: parsed.splitRows ?? null,
     };
   } catch {
-    return { specs: null, options: {}, splitRows: null };
+    return { specs: null, options: {} };
   }
 }
 

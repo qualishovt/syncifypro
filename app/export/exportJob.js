@@ -498,30 +498,6 @@ function applyValueFormatting(rows, format, options = {}) {
   });
 }
 
-/**
- * Split rows into chunks of about `size` records WITHOUT breaking a
- * multi-row record apart — products and orders explode into several rows
- * that must travel together, marked by `top_row` on the first one.
- *
- * @returns {object[][]} one chunk when splitting is off or unnecessary
- */
-export function chunkRows(rows, size) {
-  const n = Number(size);
-  if (!Number.isFinite(n) || n <= 0 || rows.length <= n) return [rows];
-
-  const chunks = [];
-  let current = [];
-  for (const row of rows) {
-    if (current.length >= n && isRecordStart(row)) {
-      chunks.push(current);
-      current = [];
-    }
-    current.push(row);
-  }
-  if (current.length) chunks.push(current);
-  return chunks;
-}
-
 // ─── tracked (in-process background) export with progress ──────────────────────
 
 /**
@@ -531,14 +507,14 @@ export function chunkRows(rows, size) {
  * Always returns `{ mode: "job", jobId }` (or `{ mode: "bulk", jobId }`); the
  * UI polls the job either way.
  */
-export async function startExport({ admin, shop, specs, format, splitRows = null, options = {}, jobId = undefined }) {
+export async function startExport({ admin, shop, specs, format, options = {}, jobId = undefined }) {
   if (!Array.isArray(specs) || specs.length === 0) {
     throw new Error("At least one entity must be selected.");
   }
   // Nothing slow happens here: the job row is created and queued immediately
   // so the UI can jump to the job page; the tracked-vs-Shopify-bulk decision
   // (an Admin count query) runs in the worker instead.
-  return startTrackedExport({ admin, shop, specs, format, splitRows, options, jobId });
+  return startTrackedExport({ admin, shop, specs, format, options, jobId });
 }
 
 /**
@@ -581,7 +557,7 @@ async function safeCount(admin, entity) {
   }
 }
 
-async function startTrackedExport({ admin, shop, specs, format, splitRows = null, options = {}, jobId = undefined }) {
+async function startTrackedExport({ admin, shop, specs, format, options = {}, jobId = undefined }) {
   let job;
   try {
     job = await createBulkExportJob({
@@ -589,9 +565,9 @@ async function startTrackedExport({ admin, shop, specs, format, splitRows = null
       shop,
       entity: specs.map((s) => s.entity).join(","),
       format,
-      // v2 envelope: options + splitRows ride along so the run page can
+      // v2 envelope: the options ride along so the run page can
       // display the configuration that actually ran (parse with parseJobSpec).
-      spec: { v: 2, specs, options, splitRows },
+      spec: { v: 2, specs, options },
       // Stored so the bulk-operations worker knows the column selection if the
       // worker later routes this job to a Shopify bulk operation.
       fields: specs.length === 1 && specs[0].fields ? specs[0].fields.join(",") : null,
@@ -627,12 +603,12 @@ async function startTrackedExport({ admin, shop, specs, format, splitRows = null
   // the queue is unavailable, fall back to processing in-process on this
   // request so exports still work (just without restart-durability).
   try {
-    await enqueueExport({ jobId: job.id, specs, format, shop, splitRows, options });
+    await enqueueExport({ jobId: job.id, specs, format, shop, options });
   } catch (err) {
     console.warn("[export] queue unavailable, running in-process:", err.message);
     (async () => {
       if (await maybeRouteToShopifyBulk({ admin, job, specs, format, options })) return;
-      await processTrackedExport({ admin, shop, job, specs, format, splitRows, options });
+      await processTrackedExport({ admin, shop, job, specs, format, options });
     })().catch(async (e) => {
       await markJobFailed({ id: job.id, errorMessage: e.message }).catch(() => {});
     });
@@ -646,14 +622,14 @@ async function startTrackedExport({ admin, shop, specs, format, splitRows = null
  * worker supplies an admin client reconstructed from the shop's offline
  * session (it has no request of its own).
  */
-export async function runExportForJob({ admin, shop, jobId, specs, format, splitRows = null, options = {} }) {
+export async function runExportForJob({ admin, shop, jobId, specs, format, options = {} }) {
   const job = await getJob(jobId);
   if (!job) throw new Error(`Export job not found: ${jobId}`);
   try {
     // Huge stores hand off to a Shopify bulk operation here (webhook-driven
     // from that point); everyone else runs the tracked path.
     if (await maybeRouteToShopifyBulk({ admin, job, specs, format, options })) return;
-    await processTrackedExport({ admin, shop, job, specs, format, splitRows, options });
+    await processTrackedExport({ admin, shop, job, specs, format, options });
   } catch (err) {
     await markJobFailed({ id: jobId, errorMessage: err.message }).catch(() => {});
     throw err;
@@ -760,11 +736,11 @@ async function snapProgressFull(jobId, processed) {
 /** Thrown when the user pressed Cancel — caught to mark the job cancelled. */
 class ExportCancelled extends Error {}
 
-async function processTrackedExport({ admin, shop, job, specs, format, splitRows = null, options = {} }) {
+async function processTrackedExport({ admin, shop, job, specs, format, options = {} }) {
   await markJobRunning({ id: job.id, bulkOperationId: null });
 
   try {
-    await processTrackedExportInner({ admin, shop, job, specs, format, splitRows, options });
+    await processTrackedExportInner({ admin, shop, job, specs, format, options });
   } catch (err) {
     if (err instanceof ExportCancelled) {
       await markJobCancelled({ id: job.id }).catch(() => {});
@@ -774,7 +750,7 @@ async function processTrackedExport({ admin, shop, job, specs, format, splitRows
   }
 }
 
-async function processTrackedExportInner({ admin, shop, job, specs, format, splitRows = null, options = {} }) {
+async function processTrackedExportInner({ admin, shop, job, specs, format, options = {} }) {
   // Bail between entities when the user pressed Cancel.
   const checkCancelled = async () => {
     if (await isJobCancelRequested(job.id)) throw new ExportCancelled();
@@ -818,53 +794,31 @@ async function processTrackedExportInner({ admin, shop, job, specs, format, spli
   const rowCount = results.reduce((sum, r) => sum + r.rows.length, 0);
   let buffer, filename, mimeType;
 
-  // Split into N-row parts when asked. Splitting always yields a zip, since
-  // one job still delivers exactly one file.
-  const parts = [];
-  for (const r of results) {
-    const ext = EXTENSION[format];
-    const chunks = chunkRows(r.rows, splitRows);
-    for (const [i, chunk] of chunks.entries()) {
-      parts.push({
-        entity: r.entity,
-        name: chunks.length > 1
-          ? `${r.entity}-part-${String(i + 1).padStart(2, "0")}.${ext}`
-          : `${r.entity}.${ext}`,
-        rows: chunk,
-        columns: columnsFor(r),
-      });
-    }
-  }
-  const wasSplit = parts.length > results.length;
-
   // Feed facts for google_feed + the Advanced CSV dialect options, one ctx.
   const feedCtx = await feedContext(admin, format);
   const adapterCtx = { ...(feedCtx ?? {}), csv: options.csv ?? undefined };
 
-  if (results.length === 1 && !wasSplit) {
+  if (results.length === 1) {
     const r   = results[0];
     const ext = EXTENSION[format];
     buffer    = await FORMAT_ADAPTERS[format](r.rows, columnsFor(r), r.entity, adapterCtx);
     filename  = `${capitalize(r.entity)}-${timestamp}.${ext}`;
     mimeType  = MIME_TYPES[format] ?? "application/octet-stream";
-  } else if (format === "excel" && !wasSplit) {
+  } else if (format === "excel") {
     buffer   = toExcelWorkbook(results.map((r) => ({ name: entitySheetName(r.entity), rows: r.rows, columns: columnsFor(r) })));
     filename = `Export-${timestamp}.xlsx`;
     mimeType = MIME_TYPES.excel;
-  } else if (format === "pdf" && !wasSplit) {
+  } else if (format === "pdf") {
     buffer   = toPDFDocument(results.map((r) => ({ name: entitySheetName(r.entity), rows: r.rows, columns: columnsFor(r) })));
     filename = `Export-${timestamp}.pdf`;
     mimeType = MIME_TYPES.pdf;
   } else {
+    // Several entities in a row-oriented format: one file each, zipped.
     const entries = [];
-    for (const p of parts) {
+    for (const r of results) {
       entries.push({
-        name: p.name,
-        data: format === "excel"
-          ? toExcelWorkbook([{ name: entitySheetName(p.entity), rows: p.rows, columns: p.columns }])
-          : format === "pdf"
-            ? toPDFDocument([{ name: entitySheetName(p.entity), rows: p.rows, columns: p.columns }])
-            : await FORMAT_ADAPTERS[format](p.rows, p.columns, p.entity, adapterCtx),
+        name: `${r.entity}.${EXTENSION[format]}`,
+        data: await FORMAT_ADAPTERS[format](r.rows, columnsFor(r), r.entity, adapterCtx),
       });
     }
     buffer   = zipParts(entries);
