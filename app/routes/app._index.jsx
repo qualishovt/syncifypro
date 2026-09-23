@@ -494,11 +494,16 @@ export default function Home() {
               <s-table-body>
                 {recentActivity.map((j) => {
                   const st = statusInfo(j);
+                  // clickDelegate points the row at its job link, which is what
+                  // makes Polaris tint the row on hover (and open the run on a
+                  // click anywhere but the row's own buttons and links). Rows
+                  // predating job numbers have no link to delegate to.
+                  const linkId = `activity-link-${j.id}`;
                   return (
-                    <s-table-row key={j.id}>
+                    <s-table-row key={j.id} clickDelegate={j.number != null ? linkId : undefined}>
                       <s-table-cell>
                         {j.number != null
-                          ? <s-link href={jobHref(j)}>{`#${j.number}`}</s-link>
+                          ? <s-link id={linkId} href={jobHref(j)}>{`#${j.number}`}</s-link>
                           : <s-text color="subdued">—</s-text>}
                       </s-table-cell>
                       <s-table-cell>
