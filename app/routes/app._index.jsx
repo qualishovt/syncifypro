@@ -18,6 +18,7 @@ import { parseImportUrl, buildRemoteUrl } from "../import/urlSource.js";
 import { ExportIcon, ImportIcon } from "../components/JobKindIcons.jsx";
 import { useElementWidth, widthProps, PickerRow } from "../components/PickerPopover.jsx";
 import PolarisTextField from "../components/PolarisTextField.jsx";
+import PolarisSelect from "../components/PolarisSelect.jsx";
 
 // ─── Loader (combined recent activity) ─────────────────────────────────────────
 
@@ -205,6 +206,7 @@ function importMeta(j) {
     id: j.id, type: "import",
     number: j.number ?? null,
     name: base, // shown without extension: "Products", not "Products.csv"
+    entity: j.entity ?? "",
     format: j.format, status: j.status,
     progressCurrent: j.progressCurrent ?? 0, progressTotal: j.progressTotal ?? null,
     created: j.created ?? 0, updated: j.updated ?? 0, deleted: j.deleted ?? 0, failed: j.failed ?? 0,
@@ -226,6 +228,7 @@ function exportMeta(j) {
     id: j.id, type: "export",
     number: j.number ?? null,
     name: j.filename || titleCaseList(j.entity),
+    entity: j.entity ?? "",
     format: j.format, status: j.status,
     progressCurrent: j.progressCurrent ?? 0, progressTotal: j.progressTotal ?? null,
     created: 0, updated: 0, deleted: 0, failed: 0,
@@ -261,6 +264,22 @@ export default function Home() {
   const nav = useNavigation();
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef(null);
+
+  // ── Recent activity: search + filters over the rows on this page ──────────
+  const [activityQuery, setActivityQuery] = useState("");
+  const [activityType, setActivityType] = useState("all");
+  const [activityStatus, setActivityStatus] = useState("all");
+  const activityFiltered = activityQuery.trim() !== "" || activityType !== "all" || activityStatus !== "all";
+  const needle = activityQuery.trim().toLowerCase();
+  const visibleActivity = recentActivity.filter((j) => {
+    if (activityType !== "all" && j.type !== activityType) return false;
+    if (activityStatus !== "all" && j.status !== activityStatus) return false;
+    if (!needle) return true;
+    // Match what the row shows: its number (with or without the #), the name,
+    // the file format and the entities behind it.
+    return [j.number != null ? `#${j.number}` : "", String(j.number ?? ""), j.name, j.format, j.entity]
+      .join(" ").toLowerCase().includes(needle);
+  });
 
   // ── Import from URL: type a URL, or pick a saved server to prefill one ────
   const [serverId, setServerId] = useState("");
@@ -476,9 +495,55 @@ export default function Home() {
         {/* ── Recent activity: combined imports + exports ──────────── */}
         {recentActivity.length > 0 && (
           <s-section heading="Recent activity">
-            <s-stack direction="inline" justifyContent="end">
-              <s-link href="/app/jobs">View all activity</s-link>
-            </s-stack>
+            {/* Search and filters work on the rows already loaded here — the
+                latest ten runs. Anything older lives on the Activity page,
+                where the same search runs against the whole history, so the
+                link below carries the query across instead of quietly
+                returning nothing. */}
+            <PolarisTextField
+              label="Search recent activity"
+              labelAccessibilityVisibility="exclusive"
+              placeholder="Search by job number, name or format"
+              value={activityQuery}
+              onChange={setActivityQuery}
+            />
+            <s-grid gridTemplateColumns="auto auto 1fr" gap="small-200" alignItems="center">
+              <PolarisSelect
+                label="Type" labelAccessibilityVisibility="exclusive"
+                value={activityType} onChange={setActivityType}
+              >
+                <s-option value="all">All types</s-option>
+                <s-option value="export">Exports</s-option>
+                <s-option value="import">Imports</s-option>
+              </PolarisSelect>
+              <PolarisSelect
+                label="Status" labelAccessibilityVisibility="exclusive"
+                value={activityStatus} onChange={setActivityStatus}
+              >
+                <s-option value="all">All statuses</s-option>
+                <s-option value="complete">Complete</s-option>
+                <s-option value="running">Running</s-option>
+                <s-option value="pending">Queued</s-option>
+                <s-option value="ready">Ready to import</s-option>
+                <s-option value="failed">Failed</s-option>
+                <s-option value="cancelled">Cancelled</s-option>
+              </PolarisSelect>
+              <s-stack direction="inline" gap="small-300" justifyContent="end" alignItems="center">
+                {activityFiltered && (
+                  <s-text color="subdued">
+                    {visibleActivity.length} of {recentActivity.length} recent
+                  </s-text>
+                )}
+                <s-link href={activityQuery.trim() ? `/app/jobs?q=${encodeURIComponent(activityQuery.trim())}` : "/app/jobs"}>
+                  {activityQuery.trim() ? "Search all activity" : "View all activity"}
+                </s-link>
+              </s-stack>
+            </s-grid>
+            {visibleActivity.length === 0 && (
+              <s-paragraph>
+                Nothing in the latest {recentActivity.length} runs matches. Search all activity to look further back.
+              </s-paragraph>
+            )}
             <s-table>
               <s-table-header-row>
                 <s-table-header>#</s-table-header>
@@ -492,7 +557,7 @@ export default function Home() {
                 <s-table-header>Action</s-table-header>
               </s-table-header-row>
               <s-table-body>
-                {recentActivity.map((j) => {
+                {visibleActivity.map((j) => {
                   const st = statusInfo(j);
                   // clickDelegate points the row at its job link, which is what
                   // makes Polaris tint the row on hover (and open the run on a

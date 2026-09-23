@@ -11,10 +11,11 @@
  */
 
 import { useSearchParams, useLoaderData, useFetcher, useNavigate } from "react-router";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { data } from "react-router";
 import { authenticate } from "../shopify.server.js";
 import PolarisSelect from "../components/PolarisSelect.jsx";
+import PolarisTextField from "../components/PolarisTextField.jsx";
 
 const PAGE_SIZE = 25;
 
@@ -22,6 +23,13 @@ const TYPES = [
   { value: "all", label: "All types" },
   { value: "export", label: "Exports" },
   { value: "import", label: "Imports" },
+];
+const PERIODS = [
+  { value: "any", label: "Any time" },
+  { value: "today", label: "Today" },
+  { value: "week", label: "Last 7 days" },
+  { value: "month", label: "Last 30 days" },
+  { value: "quarter", label: "Last 90 days" },
 ];
 const STATUSES = [
   { value: "all", label: "All statuses" },
@@ -40,13 +48,36 @@ export async function loader({ request }) {
   const url = new URL(request.url);
   const type = url.searchParams.get("type") ?? "all";
   const status = url.searchParams.get("status") ?? "all";
+  const entity = url.searchParams.get("entity") ?? "all";
+  const period = url.searchParams.get("period") ?? "any";
+  const q = (url.searchParams.get("q") ?? "").trim();
   const page = Math.max(1, parseInt(url.searchParams.get("page") ?? "1", 10) || 1);
 
   const db = (await import("../db.server.js")).default;
   const { signDownloadUrl } = await import("../export/delivery/r2.js");
   const { getAppSettings } = await import("../db/appSettings.server.js");
 
-  const where = { shop: session.shop, ...(status === "all" ? {} : { status }) };
+  // Search covers what a merchant can actually see in a row: its number
+  // ("#1042" and "1042" both work), the file name, and the entity names.
+  const qNumber = parseInt(q.replace(/^#/, ""), 10);
+  const search = q
+    ? {
+        OR: [
+          { filename: { contains: q, mode: "insensitive" } },
+          { entity: { contains: q, mode: "insensitive" } },
+          ...(Number.isFinite(qNumber) ? [{ number: qNumber }] : []),
+        ],
+      }
+    : {};
+
+  const where = {
+    shop: session.shop,
+    ...(status === "all" ? {} : { status }),
+    // `entity` is a comma-list on multi-entity runs, so match on substring.
+    ...(entity === "all" ? {} : { entity: { contains: entity } }),
+    ...(periodStart(period) ? { createdAt: { gte: periodStart(period) } } : {}),
+    ...search,
+  };
   const wantExports = type === "all" || type === "export";
   const wantImports = type === "all" || type === "import";
 
@@ -78,8 +109,35 @@ export async function loader({ request }) {
     return { ...rest, files };
   }));
 
+  // Entity filter options: every entity this shop has ever run, from the
+  // comma-lists both tables store. Unfiltered on purpose — the choices must
+  // not shrink as the other filters narrow the rows.
+  const [exportEntities, importEntities] = await Promise.all([
+    db.bulkExportJob.groupBy({ by: ["entity"], where: { shop: session.shop } }),
+    db.bulkImportJob.groupBy({ by: ["entity"], where: { shop: session.shop } }),
+  ]);
+  const entities = [...new Set(
+    [...exportEntities, ...importEntities]
+      .flatMap((r) => String(r.entity || "").split(","))
+      .map((e) => e.trim())
+      .filter(Boolean),
+  )].sort();
+
   const { timezone } = await getAppSettings(session.shop);
-  return { jobs, total, page, pages: Math.max(1, Math.ceil(total / PAGE_SIZE)), type, status, timezone };
+  return {
+    jobs, total, page, pages: Math.max(1, Math.ceil(total / PAGE_SIZE)),
+    type, status, entity, period, q, entities, timezone,
+  };
+}
+
+/** Start of the window a `period` filter covers; null = any time. */
+function periodStart(period) {
+  const days = { today: 1, week: 7, month: 30, quarter: 90 }[period];
+  if (!days) return null;
+  const from = new Date();
+  if (period === "today") from.setHours(0, 0, 0, 0);
+  else from.setTime(from.getTime() - days * 86_400_000);
+  return from;
 }
 
 const iso = (d) => (d ? new Date(d).toISOString() : null);
@@ -200,7 +258,7 @@ const duplicateHref = (j) => (j.type === "export"
 const STATUS_LABEL = { complete: "Complete", failed: "Failed", running: "Running", pending: "Queued", ready: "Ready to import", cancelled: "Cancelled" };
 
 export default function JobsPage() {
-  const { jobs, total, page, pages, type, status, timezone } = useLoaderData();
+  const { jobs, total, page, pages, type, status, entity, period, q, entities, timezone } = useLoaderData();
   const [, setSearchParams] = useSearchParams();
   const fetcher = useFetcher();
   const navigate = useNavigate();
@@ -215,8 +273,28 @@ export default function JobsPage() {
   const setParam = (key, value) =>
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
-      next.set(key, value);
+      if (value === "" || value === "all" || value === "any") next.delete(key);
+      else next.set(key, value);
       if (key !== "page") next.set("page", "1"); // a new filter restarts paging
+      return next;
+    });
+
+  // The search box types locally and queries a beat later, so each keystroke
+  // isn't a round trip to the server; the URL stays the source of truth.
+  const [query, setQuery] = useState(q);
+  useEffect(() => { setQuery(q); }, [q]);
+  useEffect(() => {
+    if (query === q) return undefined;
+    const t = setTimeout(() => setParam("q", query.trim()), 350);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query]);
+
+  const filtered = type !== "all" || status !== "all" || entity !== "all" || period !== "any" || q !== "";
+  const clearAll = () =>
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      ["q", "type", "status", "entity", "period", "page"].forEach((k) => next.delete(k));
       return next;
     });
 
@@ -226,17 +304,34 @@ export default function JobsPage() {
   return (
     <s-page heading="Activity">
       <s-section>
-        <s-grid gridTemplateColumns="auto auto 1fr" gap="small-200" alignItems="center">
+        <PolarisTextField
+          label="Search activity"
+          labelAccessibilityVisibility="exclusive"
+          placeholder="Search by job number, file name or entity"
+          value={query}
+          onChange={setQuery}
+        />
+        <s-grid gridTemplateColumns="auto auto auto auto 1fr" gap="small-200" alignItems="center">
           <PolarisSelect label="Type" labelAccessibilityVisibility="exclusive" value={type} onChange={(v) => setParam("type", v)}>
             {TYPES.map((t) => <s-option key={t.value} value={t.value}>{t.label}</s-option>)}
           </PolarisSelect>
           <PolarisSelect label="Status" labelAccessibilityVisibility="exclusive" value={status} onChange={(v) => setParam("status", v)}>
             {STATUSES.map((s) => <s-option key={s.value} value={s.value}>{s.label}</s-option>)}
           </PolarisSelect>
-          <s-text color="subdued">
-            {total.toLocaleString()} job{total === 1 ? "" : "s"}
-            {pages > 1 ? ` · page ${page} of ${pages}` : ""}
-          </s-text>
+          <PolarisSelect label="Entity" labelAccessibilityVisibility="exclusive" value={entity} onChange={(v) => setParam("entity", v)}>
+            <s-option value="all">All entities</s-option>
+            {entities.map((e) => <s-option key={e} value={e}>{titleCase(e)}</s-option>)}
+          </PolarisSelect>
+          <PolarisSelect label="Date" labelAccessibilityVisibility="exclusive" value={period} onChange={(v) => setParam("period", v)}>
+            {PERIODS.map((p) => <s-option key={p.value} value={p.value}>{p.label}</s-option>)}
+          </PolarisSelect>
+          <s-stack direction="inline" gap="small-300" alignItems="center">
+            <s-text color="subdued">
+              {total.toLocaleString()} {filtered ? "matching " : ""}job{total === 1 ? "" : "s"}
+              {pages > 1 ? ` · page ${page} of ${pages}` : ""}
+            </s-text>
+            {filtered && <s-button variant="tertiary" onClick={clearAll}>Clear all</s-button>}
+          </s-stack>
         </s-grid>
         {fetcher.data?.error && <s-banner tone="critical">{fetcher.data.error}</s-banner>}
       </s-section>
