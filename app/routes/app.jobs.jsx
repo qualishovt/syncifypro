@@ -16,11 +16,11 @@ import { data } from "react-router";
 import { authenticate } from "../shopify.server.js";
 import PolarisSelect from "../components/PolarisSelect.jsx";
 import PolarisTextField from "../components/PolarisTextField.jsx";
+import MultiFilter from "../components/MultiFilter.jsx";
 
 const PAGE_SIZE = 25;
 
 const TYPES = [
-  { value: "all", label: "All types" },
   { value: "export", label: "Exports" },
   { value: "import", label: "Imports" },
 ];
@@ -32,7 +32,6 @@ const PERIODS = [
   { value: "quarter", label: "Last 90 days" },
 ];
 const STATUSES = [
-  { value: "all", label: "All statuses" },
   { value: "complete", label: "Complete" },
   { value: "running", label: "Running" },
   { value: "pending", label: "Queued" },
@@ -46,9 +45,13 @@ const STATUSES = [
 export async function loader({ request }) {
   const { session } = await authenticate.admin(request);
   const url = new URL(request.url);
-  const type = url.searchParams.get("type") ?? "all";
-  const status = url.searchParams.get("status") ?? "all";
-  const entity = url.searchParams.get("entity") ?? "all";
+  // Type, status and entity each take SEVERAL values as a comma-list
+  // ("?status=complete,failed"); an empty list means no filter at all.
+  const listParam = (key) =>
+    (url.searchParams.get(key) ?? "").split(",").map((v) => v.trim()).filter(Boolean);
+  const type = listParam("type");
+  const status = listParam("status");
+  const entity = listParam("entity");
   const period = url.searchParams.get("period") ?? "any";
   const q = (url.searchParams.get("q") ?? "").trim();
   const page = Math.max(1, parseInt(url.searchParams.get("page") ?? "1", 10) || 1);
@@ -72,14 +75,17 @@ export async function loader({ request }) {
 
   const where = {
     shop: session.shop,
-    ...(status === "all" ? {} : { status }),
-    // `entity` is a comma-list on multi-entity runs, so match on substring.
-    ...(entity === "all" ? {} : { entity: { contains: entity } }),
+    ...(status.length ? { status: { in: status } } : {}),
+    // A run's `entity` is itself a comma-list on multi-entity jobs, so each
+    // chosen entity matches on substring and any of them is enough.
+    ...(entity.length ? { OR: entity.map((e) => ({ entity: { contains: e } })) } : {}),
     ...(periodStart(period) ? { createdAt: { gte: periodStart(period) } } : {}),
-    ...search,
+    // Both `search` and the entity filter want OR; AND keeps them independent
+    // instead of one overwriting the other's key.
+    ...(search.OR && entity.length ? { AND: [{ OR: search.OR }] } : search),
   };
-  const wantExports = type === "all" || type === "export";
-  const wantImports = type === "all" || type === "import";
+  const wantExports = !type.length || type.includes("export");
+  const wantImports = !type.length || type.includes("import");
 
   // Two tables, so take a page's worth from each and merge. Over-fetching by
   // (page × size) keeps the merged ordering right without a cross-table cursor.
@@ -270,11 +276,14 @@ export default function JobsPage() {
     if (goto && fetcher.state === "idle") navigate(goto);
   }, [goto, fetcher.state, navigate]);
 
+  // Arrays go in as comma-lists; an empty value (or an empty list) drops the
+  // parameter entirely so a cleared filter leaves a clean URL.
   const setParam = (key, value) =>
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
-      if (value === "" || value === "all" || value === "any") next.delete(key);
-      else next.set(key, value);
+      const raw = Array.isArray(value) ? value.join(",") : value;
+      if (!raw || raw === "any") next.delete(key);
+      else next.set(key, raw);
       if (key !== "page") next.set("page", "1"); // a new filter restarts paging
       return next;
     });
@@ -290,7 +299,7 @@ export default function JobsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
 
-  const filtered = type !== "all" || status !== "all" || entity !== "all" || period !== "any" || q !== "";
+  const filtered = type.length > 0 || status.length > 0 || entity.length > 0 || period !== "any" || q !== "";
   const clearAll = () =>
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
@@ -312,16 +321,19 @@ export default function JobsPage() {
           onChange={setQuery}
         />
         <s-grid gridTemplateColumns="auto auto auto auto 1fr" gap="small-200" alignItems="center">
-          <PolarisSelect label="Type" labelAccessibilityVisibility="exclusive" value={type} onChange={(v) => setParam("type", v)}>
-            {TYPES.map((t) => <s-option key={t.value} value={t.value}>{t.label}</s-option>)}
-          </PolarisSelect>
-          <PolarisSelect label="Status" labelAccessibilityVisibility="exclusive" value={status} onChange={(v) => setParam("status", v)}>
-            {STATUSES.map((s) => <s-option key={s.value} value={s.value}>{s.label}</s-option>)}
-          </PolarisSelect>
-          <PolarisSelect label="Entity" labelAccessibilityVisibility="exclusive" value={entity} onChange={(v) => setParam("entity", v)}>
-            <s-option value="all">All entities</s-option>
-            {entities.map((e) => <s-option key={e} value={e}>{titleCase(e)}</s-option>)}
-          </PolarisSelect>
+          <MultiFilter
+            id="jobs-type-filter" label="Type" allLabel="All types"
+            options={TYPES} selected={type} onChange={(v) => setParam("type", v)}
+          />
+          <MultiFilter
+            id="jobs-status-filter" label="Status" allLabel="All statuses"
+            options={STATUSES} selected={status} onChange={(v) => setParam("status", v)}
+          />
+          <MultiFilter
+            id="jobs-entity-filter" label="Entity" allLabel="All entities"
+            options={entities.map((e) => ({ value: e, label: titleCase(e) }))}
+            selected={entity} onChange={(v) => setParam("entity", v)}
+          />
           <PolarisSelect label="Date" labelAccessibilityVisibility="exclusive" value={period} onChange={(v) => setParam("period", v)}>
             {PERIODS.map((p) => <s-option key={p.value} value={p.value}>{p.label}</s-option>)}
           </PolarisSelect>

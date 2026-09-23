@@ -18,7 +18,20 @@ import { parseImportUrl, buildRemoteUrl } from "../import/urlSource.js";
 import { ExportIcon, ImportIcon } from "../components/JobKindIcons.jsx";
 import { useElementWidth, widthProps, PickerRow } from "../components/PickerPopover.jsx";
 import PolarisTextField from "../components/PolarisTextField.jsx";
-import PolarisSelect from "../components/PolarisSelect.jsx";
+import MultiFilter from "../components/MultiFilter.jsx";
+
+const ACTIVITY_TYPES = [
+  { value: "export", label: "Exports" },
+  { value: "import", label: "Imports" },
+];
+const ACTIVITY_STATUSES = [
+  { value: "complete", label: "Complete" },
+  { value: "running", label: "Running" },
+  { value: "pending", label: "Queued" },
+  { value: "ready", label: "Ready to import" },
+  { value: "failed", label: "Failed" },
+  { value: "cancelled", label: "Cancelled" },
+];
 
 // ─── Loader (combined recent activity) ─────────────────────────────────────────
 
@@ -267,13 +280,15 @@ export default function Home() {
 
   // ── Recent activity: search + filters over the rows on this page ──────────
   const [activityQuery, setActivityQuery] = useState("");
-  const [activityType, setActivityType] = useState("all");
-  const [activityStatus, setActivityStatus] = useState("all");
-  const activityFiltered = activityQuery.trim() !== "" || activityType !== "all" || activityStatus !== "all";
+  // Both filters take several values at once, like the Activity page; an
+  // empty list means "all", so there is no pseudo-option to keep in sync.
+  const [activityType, setActivityType] = useState([]);
+  const [activityStatus, setActivityStatus] = useState([]);
+  const activityFiltered = activityQuery.trim() !== "" || activityType.length > 0 || activityStatus.length > 0;
   const needle = activityQuery.trim().toLowerCase();
   const visibleActivity = recentActivity.filter((j) => {
-    if (activityType !== "all" && j.type !== activityType) return false;
-    if (activityStatus !== "all" && j.status !== activityStatus) return false;
+    if (activityType.length && !activityType.includes(j.type)) return false;
+    if (activityStatus.length && !activityStatus.includes(j.status)) return false;
     if (!needle) return true;
     // Match what the row shows: its number (with or without the #), the name,
     // the file format and the entities behind it.
@@ -508,26 +523,14 @@ export default function Home() {
               onChange={setActivityQuery}
             />
             <s-grid gridTemplateColumns="auto auto 1fr" gap="small-200" alignItems="center">
-              <PolarisSelect
-                label="Type" labelAccessibilityVisibility="exclusive"
-                value={activityType} onChange={setActivityType}
-              >
-                <s-option value="all">All types</s-option>
-                <s-option value="export">Exports</s-option>
-                <s-option value="import">Imports</s-option>
-              </PolarisSelect>
-              <PolarisSelect
-                label="Status" labelAccessibilityVisibility="exclusive"
-                value={activityStatus} onChange={setActivityStatus}
-              >
-                <s-option value="all">All statuses</s-option>
-                <s-option value="complete">Complete</s-option>
-                <s-option value="running">Running</s-option>
-                <s-option value="pending">Queued</s-option>
-                <s-option value="ready">Ready to import</s-option>
-                <s-option value="failed">Failed</s-option>
-                <s-option value="cancelled">Cancelled</s-option>
-              </PolarisSelect>
+              <MultiFilter
+                id="home-type-filter" label="Type" allLabel="All types"
+                options={ACTIVITY_TYPES} selected={activityType} onChange={setActivityType}
+              />
+              <MultiFilter
+                id="home-status-filter" label="Status" allLabel="All statuses"
+                options={ACTIVITY_STATUSES} selected={activityStatus} onChange={setActivityStatus}
+              />
               <s-stack direction="inline" gap="small-300" justifyContent="end" alignItems="center">
                 {activityFiltered && (
                   <s-text color="subdued">
