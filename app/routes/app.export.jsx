@@ -35,6 +35,7 @@ import { buildRemoteUrl } from "../import/urlSource.js";
 // PolarisTextField helpers with different signatures — hence the aliases).
 import SharedTextField from "../components/PolarisTextField.jsx";
 import FormatIcon from "../components/FormatIcon.jsx";
+import { stableJson } from "../utils/stableJson.js";
 
 /**
  * Per-entity filter controls — each maps to a key the matching filter
@@ -622,10 +623,27 @@ export async function action({ request }) {
 
   // Save / delete a named export preset (server-persisted so it sticks and can
   // be picked by a Schedule).
+  if (intent === "renamePreset" || intent === "duplicatePreset") {
+    const mod = await import("../db/exportPreset.server.js");
+    const id = String(formData.get("id") || "");
+    const res = intent === "renamePreset"
+      ? await mod.renamePreset(session.shop, id, String(formData.get("name") || ""))
+      : await mod.duplicatePreset(session.shop, id);
+    if (res.error) return data({ error: res.error }, { status: 400 });
+    const p = res.preset;
+    return {
+      presetRenamed: intent === "renamePreset" || undefined,
+      presetDuplicated: intent === "duplicatePreset" || undefined,
+      preset: serializePreset(p),
+    };
+  }
   if (intent === "savePreset") {
-    const { savePreset } = await import("../db/exportPreset.server.js");
+    const { savePreset, RESERVED_NAME } = await import("../db/exportPreset.server.js");
     const name = String(formData.get("name") || "").trim();
     if (!name) return data({ error: "Preset name is required." }, { status: 400 });
+    if (RESERVED_NAME.test(name)) {
+      return data({ error: "A preset name can't start with two underscores." }, { status: 400 });
+    }
     let spec = [], state = null;
     try { spec = JSON.parse(String(formData.get("spec") || "[]")); } catch { /* ignore */ }
     try { state = formData.get("state") ? JSON.parse(String(formData.get("state"))) : null; } catch { /* ignore */ }
@@ -864,6 +882,7 @@ const VALUELESS_OPERATORS = new Set(["is_empty", "is_not_empty"]);
 const PRESET_BUILTIN = ["Latest Export", "New Export"];
 
 
+
 export default function ExportPage() {
   const loaderData = useLoaderData();
   const dataFetcher = useFetcher(); // lazily fetches the heavy counts + dynamic columns
@@ -1019,6 +1038,19 @@ export default function ExportPage() {
   const [savedPresets, setSavedPresets] = useState(() => loaderData.presets ?? []);
   const [presetName, setPresetName] = useState("");
   const [lastConfig, setLastConfig] = useState(null);
+  // Row actions inside the picker: which preset is being renamed (and the
+  // text being typed), and which one is waiting for its delete to be
+  // confirmed. Both are ids, so a rename can't follow the wrong row.
+  const [renamingId, setRenamingId] = useState("");
+  const [renameText, setRenameText] = useState("");
+  const [confirmDeleteId, setConfirmDeleteId] = useState("");
+  // The page as the picked preset left it. Everything the preset would save
+  // is snapshotted here when one is applied (or saved); comparing the same
+  // snapshot after each change is what decides the star / Update.
+  const [baseline, setBaseline] = useState(null);
+  // Set to re-take the baseline on the next paint — after applying a preset
+  // the new configuration only exists once React has re-rendered.
+  const rebaseline = useRef(true);
 
   // Per-entity state: { enabled, filters: {key→value}, selectedFields: string[] }
   const [entityState, setEntityState] = useState(() => initialEntityState());
@@ -1178,9 +1210,17 @@ export default function ExportPage() {
   // preset restores its stored format + entity configuration.
   function applyPreset(name) {
     setPreset(name);
+    // The applied configuration only exists after the next render, so the
+    // baseline is taken there rather than from the values written here.
+    rebaseline.current = true;
+    setRenamingId("");
+    setConfirmDeleteId("");
     if (name === "New Export") {
+      // "No preset" is the page as it is first drawn — the advanced options
+      // reset too, or a setting from the previous preset would survive it.
       setEntityState(initialEntityState());
       setFormat(loaderData.defaultFormat ?? "excel");
+      applyAdvancedOptions({});
     } else if (name === "Latest Export") {
       // In-session copy first (it has the freshest UI state); otherwise
       // rebuild from the last run's stored spec, so this works after reload.
@@ -1238,10 +1278,44 @@ export default function ExportPage() {
     });
   }
 
+  // What a preset would save, as one comparable string. The ad-hoc delivery
+  // URL is left out because a preset never stores it — otherwise typing one
+  // would show a change that saving could not capture.
+  function presetSignature() {
+    const options = buildAdvancedOptions();
+    delete options.deliverUrl;
+    return stableJson({ format, spec: buildSpecs(), options });
+  }
+  const currentSignature = presetSignature();
+  const pickedSaved = savedPresets.find((p) => p.name === preset) ?? null;
+  const dirty = baseline !== null && currentSignature !== baseline;
+
+  // Take the baseline once the applied configuration is actually on the page
+  // (and once on first paint, so an untouched page counts as unchanged).
+  // No dependency list on purpose: the ref is the guard (one baseline per
+  // request), and depending on the signature would re-baseline after every
+  // edit — which is exactly what must NOT happen.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!rebaseline.current) return;
+    rebaseline.current = false;
+    setBaseline(currentSignature);
+  });
+
+  // A duplicate's name is invented by the server (Name (2), (3) …), so the
+  // list takes it from the reply rather than guessing it here.
+  useEffect(() => {
+    const d = presetFetcher.data;
+    if (!d?.preset || presetFetcher.state !== "idle") return;
+    setSavedPresets((prev) => (prev.some((x) => x.id === d.preset.id)
+      ? prev.map((x) => (x.id === d.preset.id ? { ...x, ...d.preset } : x))
+      : [d.preset, ...prev]));
+  }, [presetFetcher.data, presetFetcher.state]);
+
   // Save the current configuration as a named preset — persisted server-side so
   // it survives reloads and can be picked by a Schedule.
-  function savePreset() {
-    const name = presetName.trim();
+  function savePreset(overrideName) {
+    const name = String(overrideName ?? presetName).trim();
     if (!name) return;
     const spec = buildSpecs();
     // Ad-hoc URL credentials must never persist — presets keep the rest.
@@ -1257,10 +1331,38 @@ export default function ExportPage() {
       { method: "post" },
     );
     setSavedPresets((prev) => [...prev.filter((p) => p.name !== name), {
+      ...(prev.find((p) => p.name === name) ?? {}),
       name, format, entityState, spec, options,
     }]);
     setPreset(name);
     setPresetName("");
+    // Just saved: what is on the page IS the preset now.
+    setBaseline(currentSignature);
+  }
+
+  // Row actions in the picker. Each goes to the server and mirrors the result
+  // locally so the list doesn't wait for a reload.
+  function renamePreset(p) {
+    const name = renameText.trim();
+    setRenamingId("");
+    if (!name || name === p.name) return;
+    presetFetcher.submit({ intent: "renamePreset", id: p.id, name }, { method: "post" });
+    setSavedPresets((prev) => prev.map((x) => (x.id === p.id ? { ...x, name } : x)));
+    if (preset === p.name) setPreset(name);
+  }
+  function duplicatePreset(p) {
+    presetFetcher.submit({ intent: "duplicatePreset", id: p.id }, { method: "post" });
+  }
+  function deletePreset(p) {
+    setConfirmDeleteId("");
+    presetFetcher.submit({ intent: "deletePreset", id: p.id }, { method: "post" });
+    setSavedPresets((prev) => prev.filter((x) => x.id !== p.id));
+    // The page keeps what it shows, but it is no longer "that preset": the
+    // baseline is taken again so nothing offers to update a deleted preset.
+    if (preset === p.name) {
+      setPreset("New Export");
+      rebaseline.current = true;
+    }
   }
 
   // The Advanced-section options as one object — the shape jobs store and
@@ -1647,17 +1749,47 @@ export default function ExportPage() {
                 </s-grid>
               </s-clickable>
             </div>
-            {/* inlineSize="fill" is the s-button way to go full-width
+            {/* One button at a time, and only when there is something to
+                save: Update writes into the picked preset, Save as keeps the
+                page under a new name. The star says the page no longer
+                matches what was picked.
+                inlineSize="fill" is the s-button way to go full-width
                 ("100%" is not a valid value and falls back to auto). */}
-            <s-button
-              variant="secondary"
-              inlineSize="fill"
-              command="--show"
-              commandFor="save-preset-modal"
-              disabled={isExporting ? true : undefined}
-            >
-              Save
-            </s-button>
+            {pickedSaved && dirty && (
+              <>
+                <s-tooltip id="preset-update-tip">
+                  The page differs from the saved preset
+                </s-tooltip>
+                <s-button
+                  variant="secondary"
+                  inlineSize="fill"
+                  interestFor="preset-update-tip"
+                  disabled={isExporting ? true : undefined}
+                  onClick={() => savePreset(pickedSaved.name)}
+                >
+                  Update
+                </s-button>
+              </>
+            )}
+            {!pickedSaved && (dirty || preset === "Latest Export") && (
+              <>
+                {dirty && (
+                  <s-tooltip id="preset-saveas-tip">
+                    The page differs from the selected preset
+                  </s-tooltip>
+                )}
+                <s-button
+                  variant="secondary"
+                  inlineSize="fill"
+                  {...(dirty ? { interestFor: "preset-saveas-tip" } : {})}
+                  command="--show"
+                  commandFor="save-preset-modal"
+                  disabled={isExporting ? true : undefined}
+                >
+                  {dirty ? "Save as *" : "Save as"}
+                </s-button>
+              </>
+            )}
           </div>
           <s-popover id="preset-popover" {...widthProps(presetTriggerWidth)}>
             <s-box padding="small-200">
@@ -1670,7 +1802,23 @@ export default function ExportPage() {
                   <s-text color="subdued">No saved exports yet.</s-text>
                 ) : (
                   savedPresets.map((p) => (
-                    <PickerRow key={p.name} label={p.name} selected={preset === p.name} onSelect={() => applyPreset(p.name)} popoverId="preset-popover" />
+                    <PresetRow
+                      key={p.id ?? p.name}
+                      preset={p}
+                      selected={preset === p.name}
+                      renaming={renamingId === (p.id ?? p.name)}
+                      renameText={renameText}
+                      confirmingDelete={confirmDeleteId === (p.id ?? p.name)}
+                      onApply={() => applyPreset(p.name)}
+                      onStartRename={() => { setRenamingId(p.id ?? p.name); setRenameText(p.name); setConfirmDeleteId(""); }}
+                      onRenameText={setRenameText}
+                      onRename={() => renamePreset(p)}
+                      onCancelRename={() => setRenamingId("")}
+                      onDuplicate={() => duplicatePreset(p)}
+                      onAskDelete={() => { setConfirmDeleteId(p.id ?? p.name); setRenamingId(""); }}
+                      onCancelDelete={() => setConfirmDeleteId("")}
+                      onDelete={() => deletePreset(p)}
+                    />
                   ))
                 )}
               </s-stack>
@@ -2379,6 +2527,63 @@ function PickerRow({ label, icon, selected, onSelect, popoverId }) {
         </span>
       </s-grid>
     </s-clickable>
+  );
+}
+
+/**
+ * A saved preset's row in the picker: the name applies it, and the three
+ * actions beside it rename, duplicate or delete it without leaving the menu.
+ * Renaming happens in place (Enter saves, the ✕ cancels) and deleting asks
+ * first, both in the row itself so the popover never has to close.
+ */
+function PresetRow({
+  preset: p, selected, renaming, renameText, confirmingDelete,
+  onApply, onStartRename, onRenameText, onRename, onCancelRename,
+  onDuplicate, onAskDelete, onCancelDelete, onDelete,
+}) {
+  if (renaming) {
+    return (
+      <s-grid gridTemplateColumns="1fr auto auto" gap="small-100" alignItems="center">
+        <SharedTextField
+          label="New name"
+          labelAccessibilityVisibility="exclusive"
+          value={renameText}
+          onChange={onRenameText}
+          onEnter={onRename}
+        />
+        <s-button variant="secondary" icon="check" accessibilityLabel="Save name" onClick={onRename} />
+        <s-button variant="tertiary" icon="x" accessibilityLabel="Cancel rename" onClick={onCancelRename} />
+      </s-grid>
+    );
+  }
+  if (confirmingDelete) {
+    return (
+      <s-grid gridTemplateColumns="1fr auto auto" gap="small-100" alignItems="center">
+        <s-text color="subdued">Delete “{p.name}”?</s-text>
+        <s-button variant="secondary" tone="critical" onClick={onDelete}>Delete</s-button>
+        <s-button variant="tertiary" onClick={onCancelDelete}>Cancel</s-button>
+      </s-grid>
+    );
+  }
+  return (
+    <s-grid gridTemplateColumns="1fr auto auto auto" gap="small-100" alignItems="center">
+      <s-clickable
+        onClick={onApply}
+        command="--hide"
+        commandFor="preset-popover"
+        padding="small-200"
+        borderRadius="base"
+        {...(selected ? { background: "subdued" } : {})}
+      >
+        <s-grid gridTemplateColumns="auto 1fr" gap="small-200" alignItems="center">
+          <span style={checkSlot}>{selected ? <s-icon type="check" /> : null}</span>
+          <span style={selected ? { fontWeight: 700 } : undefined}>{p.name}</span>
+        </s-grid>
+      </s-clickable>
+      <s-button variant="tertiary" icon="edit" accessibilityLabel={`Rename ${p.name}`} onClick={onStartRename} />
+      <s-button variant="tertiary" icon="duplicate" accessibilityLabel={`Duplicate ${p.name}`} onClick={onDuplicate} />
+      <s-button variant="tertiary" icon="delete" accessibilityLabel={`Delete ${p.name}`} onClick={onAskDelete} />
+    </s-grid>
   );
 }
 /* eslint-enable react/prop-types */
