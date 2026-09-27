@@ -12,7 +12,7 @@
  *   3. When it finishes, download the results workbook (per-row status/errors).
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useFetcher, useLoaderData, useNavigate } from "react-router";
 import { data, redirect } from "react-router";
 import { authenticate } from "../shopify.server.js";
@@ -23,6 +23,7 @@ import PolarisTextField from "../components/PolarisTextField.jsx";
 import PolarisSwitch from "../components/PolarisSwitch.jsx";
 import PolarisDateField from "../components/PolarisDateField.jsx";
 import { PickerRow, widthProps, useElementWidth, checkSlot } from "../components/PickerPopover.jsx";
+import { autoPlan } from "../import/autoPlan.js";
 import { ENTITIES, ENTITY_ICONS, entityDisplayName } from "../export/entityMeta.js";
 import { ImportIcon } from "../components/JobKindIcons.jsx";
 import FormatIcon from "../components/FormatIcon.jsx";
@@ -574,6 +575,7 @@ const DEFAULT_IMPORT_OPTS = {
 };
 const RESULTS_TIME_SOURCES = new Set(["started", "scheduled", "saved"]);
 
+
 // Information-card status badges — same tones/labels as the run page.
 const STATUS_TONE = { complete: "success", failed: "critical", running: "info", pending: "info", cancelled: "warning" };
 const STATUS_LABEL = { complete: "Complete", failed: "Failed", running: "Running", pending: "Queued", cancelled: "Cancelled" };
@@ -721,12 +723,7 @@ function ImportPage() {
 
   // Initialise the plan once the first preview is available.
   useEffect(() => {
-    if (preview && plan == null) {
-      setPlan(preview.sheets.map((s) => ({
-        entity: s.ok ? s.entity : "auto",
-        include: Boolean(s.ok),
-      })));
-    }
+    if (preview && plan == null) setPlan(autoPlan(preview));
   }, [preview, plan]);
 
   // When apply returns a jobId, stay on this page and give the run its own
@@ -809,50 +806,75 @@ function ImportPage() {
     columnTimer.current = setTimeout(() => submit("analyze", next), 600);
   }
 
-  // Apply a saved preset: restore its plan + mode, then re-analyze the file so
-  // counts/filters/columns reflect the loaded config.
-  function applyPreset(id) {
-    setPresetId(id);
-    const p = presets.find((x) => x.id === id);
-    if (!p) return;
-    const nextMode = p.options?.mode || "normal";
-    setImportMode(nextMode);
-    // Restore the preset's behavior/results choices (defaults fill gaps; a
-    // legacy "finished" time source falls back to "started").
+  // Applying a preset is ONE change on screen. The analysis it needs is
+  // fetched FIRST and the page keeps showing what it showed; when the answer
+  // lands, the plan, the mode, the options and the new analysis are written
+  // together (see the layout effect below). Writing them as they arrive would
+  // rearrange the cards twice — the half-way state the merchant should never
+  // see.
+  const pendingPreset = useRef(null);
+
+  /** The preset's options, with defaults for gaps and the delivery URL rebuilt. */
+  function presetOptions(p) {
     const merged = { ...DEFAULT_IMPORT_OPTS, ...(p.options ?? {}) };
+    // A legacy "finished" time source falls back to "started".
     if (!RESULTS_TIME_SOURCES.has(merged.resultsTimeSource)) merged.resultsTimeSource = "started";
     // A saved-server delivery is stored as id + folder; rebuild the shown URL
     // (username only — never the password) so the field reads as before.
     const srv = (servers ?? []).find((s) => s.id === merged.resultsServerId);
     if (srv) merged.resultsDeliverUrl = buildRemoteUrl(srv, merged.resultsDeliverPath || "");
     else if (merged.resultsServerId !== "url") merged.resultsServerId = "none";
-    setImportOpts(merged);
-    if (Array.isArray(p.plan) && p.plan.length) {
-      setPlan(p.plan);
-      const fd = new FormData();
-      fd.set("mode", "analyze");
-      fd.set("src", src ?? "");
-      fd.set("name", name ?? "");
-      fd.set("plan", JSON.stringify(p.plan));
-      fd.set("importMode", nextMode);
-      fetcher.submit(fd, { method: "post" });
-    }
+    return merged;
   }
 
-  // "New Import" in the preset popover: back to the file's auto-detected plan.
-  function resetPreset() {
-    const mode = defaultImportMode ?? "normal";
-    setPresetId("");
-    setImportMode(mode);
-    setImportOpts(DEFAULT_IMPORT_OPTS);
-    setPlan(null); // the init effect rebuilds it from the fresh analysis
+  function analyzeFor(planArg, mode) {
     const fd = new FormData();
     fd.set("mode", "analyze");
     fd.set("src", src ?? "");
     fd.set("name", name ?? "");
+    if (planArg) fd.set("plan", JSON.stringify(planArg));
     fd.set("importMode", mode);
     fetcher.submit(fd, { method: "post" });
   }
+
+  function applyPreset(id) {
+    const p = presets.find((x) => x.id === id);
+    if (!p) return;
+    const mode = p.options?.mode || "normal";
+    const options = presetOptions(p);
+    const plan = Array.isArray(p.plan) && p.plan.length ? p.plan : null;
+    // No plan to re-analyse against: nothing to wait for, write it now.
+    if (!plan) {
+      setPresetId(id);
+      setImportMode(mode);
+      setImportOpts(options);
+      return;
+    }
+    pendingPreset.current = { id, plan, mode, options };
+    analyzeFor(plan, mode);
+  }
+
+  // "New Import" in the preset popover: back to the file's auto-detected plan,
+  // and equally in one pass — `plan: null` means "take the fresh analysis's
+  // own reading of the file".
+  function resetPreset() {
+    const mode = defaultImportMode ?? "normal";
+    pendingPreset.current = { id: "", plan: null, mode, options: DEFAULT_IMPORT_OPTS };
+    analyzeFor(null, mode);
+  }
+
+  // The commit half of the one-pass apply. A layout effect, not a plain one:
+  // it runs BEFORE the browser paints, so the render that carries the new
+  // analysis with the old plan never reaches the screen.
+  useLayoutEffect(() => {
+    const pend = pendingPreset.current;
+    if (!pend || fetcher.state !== "idle" || d?.mode !== "analyze") return;
+    pendingPreset.current = null;
+    setPresetId(pend.id);
+    setImportMode(pend.mode);
+    setImportOpts(pend.options);
+    setPlan(pend.plan ?? autoPlan(d.preview));
+  }, [d, fetcher.state]);
 
   const presetLabel = presets.find((p) => p.id === presetId)?.name ?? "New Import";
   const modeOption = MODE_OPTIONS.find((m) => m.value === importMode) ?? MODE_OPTIONS[0];
