@@ -37,6 +37,7 @@ import SharedTextField from "../components/PolarisTextField.jsx";
 import FormatIcon from "../components/FormatIcon.jsx";
 import { stableJson } from "../utils/stableJson.js";
 import { presetButton } from "../utils/presetButton.js";
+import { EXPORT_TEMPLATES, templateById } from "../export/templates.js";
 
 /**
  * Per-entity filter controls — each maps to a key the matching filter
@@ -1053,6 +1054,9 @@ export default function ExportPage() {
   // save modal's input; lastConfig captures the most recent export so
   // "Latest Export" can restore it.
   const [preset, setPreset] = useState(remembered?.preset ?? "New Export");
+  // Which template is on the page, if any — kept by id so a saved preset of
+  // the same name is still a different thing.
+  const [templateId, setTemplateId] = useState(remembered?.templateId ?? "");
   const [savedPresets, setSavedPresets] = useState(() => loaderData.presets ?? []);
   const [presetName, setPresetName] = useState("");
   const [lastConfig, setLastConfig] = useState(null);
@@ -1230,8 +1234,25 @@ export default function ExportPage() {
 
   // Apply a preset: built-ins reset or restore the last export; a saved
   // preset restores its stored format + entity configuration.
+  /**
+   * Put a built-in template on the page. Applied exactly like a preset — it
+   * just can't be renamed, changed or deleted, and saving keeps it as a
+   * preset of the merchant's own rather than writing back into the template.
+   */
+  function applyTemplate(t) {
+    setPreset(t.name);
+    setTemplateId(t.id);
+    rebaseline.current = true;
+    setRenamingId("");
+    setConfirmDeleteId("");
+    setFormat(t.format);
+    setEntityState(normalizeStateSorts(stateFromSpec(t.specs)));
+    applyAdvancedOptions(t.options ?? {});
+  }
+
   function applyPreset(name) {
     setPreset(name);
+    setTemplateId("");
     // The applied configuration only exists after the next render, so the
     // baseline is taken there rather than from the values written here.
     rebaseline.current = true;
@@ -1314,7 +1335,10 @@ export default function ExportPage() {
   // Which single button to show — the rule lives in presetButton.js so it can
   // be read (and tested) as a table rather than inferred from the markup.
   const presetAction = presetButton({
-    picked: pickedSaved ? "saved" : preset === "Latest Export" ? "latest" : "none",
+    picked: templateId ? "template"
+      : pickedSaved ? "saved"
+      : preset === "Latest Export" ? "latest"
+      : "none",
     dirty,
   });
 
@@ -1345,7 +1369,7 @@ export default function ExportPage() {
   useEffect(() => {
     const options = buildAdvancedOptions();
     delete options.deliverUrl;
-    const payload = JSON.stringify({ preset, format, entityState, options, baseline });
+    const payload = JSON.stringify({ preset, templateId, format, entityState, options, baseline });
     if (rememberedPayload.current === null) { rememberedPayload.current = payload; return undefined; }
     if (rememberedPayload.current === payload) return undefined;
     const t = setTimeout(() => {
@@ -1354,7 +1378,7 @@ export default function ExportPage() {
     }, 900);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preset, format, entityState, currentSignature, baseline]);
+  }, [preset, templateId, format, entityState, currentSignature, baseline]);
 
   // A duplicate's name is invented by the server (Name (2), (3) …), so the
   // list takes it from the reply rather than guessing it here.
@@ -1391,6 +1415,7 @@ export default function ExportPage() {
       name, format, entityState, spec, options,
     }]);
     setPreset(name);
+    setTemplateId(""); // saved under a name of its own, it is a preset now
     setPresetName("");
     // Just saved: what is on the page IS the preset now.
     setBaseline(currentSignature);
@@ -1849,11 +1874,25 @@ export default function ExportPage() {
               </>
             )}
           </div>
+          {/* A template says what it is for — it is not a name the merchant chose. */}
+          {templateId && (
+            <s-text color="subdued">{templateById(templateId)?.description}</s-text>
+          )}
           <s-popover id="preset-popover" {...widthProps(presetTriggerWidth)}>
             <s-box padding="small-200">
               <s-stack direction="block" gap="small-300">
                 {PRESET_BUILTIN.map((name) => (
                   <PickerRow key={name} label={name} selected={preset === name} onSelect={() => applyPreset(name)} popoverId="preset-popover" />
+                ))}
+                <s-text color="subdued">Templates</s-text>
+                {EXPORT_TEMPLATES.map((t) => (
+                  <PickerRow
+                    key={t.id}
+                    label={t.name}
+                    selected={templateId === t.id}
+                    onSelect={() => applyTemplate(t)}
+                    popoverId="preset-popover"
+                  />
                 ))}
                 <s-text color="subdued">Saved</s-text>
                 {savedPresets.length === 0 ? (

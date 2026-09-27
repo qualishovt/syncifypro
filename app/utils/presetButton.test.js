@@ -21,10 +21,21 @@ test("a saved preset that drifted offers Update, never Save as", () => {
 });
 
 test("only ever one button", () => {
-  for (const picked of ["none", "latest", "saved"]) {
+  for (const picked of ["none", "latest", "saved", "template"]) {
     for (const dirty of [true, false]) {
       const shown = presetButton({ picked, dirty });
       assert.ok(shown === null || typeof shown === "string");
     }
+  }
+});
+
+test("a template can always be kept as a preset of one's own", () => {
+  assert.equal(presetButton({ picked: "template", dirty: false }), "saveAs");
+  assert.equal(presetButton({ picked: "template", dirty: true }), "saveAsStar");
+});
+
+test("a template is never updated in place", () => {
+  for (const dirty of [true, false]) {
+    assert.notEqual(presetButton({ picked: "template", dirty }), "update");
   }
 });
