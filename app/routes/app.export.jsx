@@ -36,6 +36,7 @@ import { buildRemoteUrl } from "../import/urlSource.js";
 import SharedTextField from "../components/PolarisTextField.jsx";
 import FormatIcon from "../components/FormatIcon.jsx";
 import { stableJson } from "../utils/stableJson.js";
+import { presetButton } from "../utils/presetButton.js";
 
 /**
  * Per-entity filter controls — each maps to a key the matching filter
@@ -1289,6 +1290,12 @@ export default function ExportPage() {
   const currentSignature = presetSignature();
   const pickedSaved = savedPresets.find((p) => p.name === preset) ?? null;
   const dirty = baseline !== null && currentSignature !== baseline;
+  // Which single button to show — the rule lives in presetButton.js so it can
+  // be read (and tested) as a table rather than inferred from the markup.
+  const presetAction = presetButton({
+    picked: pickedSaved ? "saved" : preset === "Latest Export" ? "latest" : "none",
+    dirty,
+  });
 
   // Take the baseline once the applied configuration is actually on the page
   // (and once on first paint, so an untouched page counts as unchanged).
@@ -1755,7 +1762,7 @@ export default function ExportPage() {
                 matches what was picked.
                 inlineSize="fill" is the s-button way to go full-width
                 ("100%" is not a valid value and falls back to auto). */}
-            {pickedSaved && dirty && (
+            {presetAction === "update" && (
               <>
                 <s-tooltip id="preset-update-tip">
                   The page differs from the saved preset
@@ -1771,7 +1778,7 @@ export default function ExportPage() {
                 </s-button>
               </>
             )}
-            {!pickedSaved && (dirty || preset === "Latest Export") && (
+            {(presetAction === "saveAs" || presetAction === "saveAsStar") && (
               <>
                 {dirty && (
                   <s-tooltip id="preset-saveas-tip">
