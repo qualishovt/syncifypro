@@ -18,7 +18,7 @@
  * native Shopify admin via the surrounding s-page/s-section/s-stack.
  */
 
-import { useState, useEffect, useRef, useMemo, Fragment } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useMemo, Fragment } from "react";
 import { useFetcher, useLoaderData, useNavigate, useLocation } from "react-router";
 import { data } from "react-router";
 import { authenticate } from "../shopify.server.js";
@@ -539,7 +539,10 @@ export async function loader({ request }) {
     return { polledJob, servers, counts: {}, lastExports: {}, productDynamic: EMPTY_PRODUCT_DYNAMIC, ready: false, presets: [], defaultFormat: "excel", blockedEntities: [], timezone: "UTC" };
   }
 
-  const { listPresets } = await import("../db/exportPreset.server.js");
+  const { listPresets, getPageState } = await import("../db/exportPreset.server.js");
+  // The page as it was left: restored before the first paint, so a reload
+  // never flashes the defaults.
+  const lastState = await getPageState(session.shop).catch(() => null);
   const { getAppSettings } = await import("../db/appSettings.server.js");
   const presets = (await listPresets(session.shop)).map(serializePreset);
   const { defaultExportFormat: defaultFormat, blockedEntities, timezone } = await getAppSettings(session.shop);
@@ -593,11 +596,11 @@ export async function loader({ request }) {
     try {
       counts.activity = await countJobsForShop(session.shop); // app-owned entity
     } catch { /* leave as "—" */ }
-    return { polledJob: null, servers, counts, lastExports, productDynamic: dynamic, ready: true, presets, defaultFormat, blockedEntities, timezone, shopTimezone, latestExport, duplicateExport };
+    return { polledJob: null, servers, counts, lastExports, productDynamic: dynamic, ready: true, presets, defaultFormat, blockedEntities, timezone, shopTimezone, latestExport, duplicateExport, lastState };
   }
 
   // Initial page load: return the shell instantly. Counts arrive via ?data=1.
-  return { polledJob: null, servers, counts: {}, lastExports: {}, productDynamic: EMPTY_PRODUCT_DYNAMIC, ready: false, presets, defaultFormat, blockedEntities, timezone, latestExport, duplicateExport };
+  return { polledJob: null, servers, counts: {}, lastExports: {}, productDynamic: EMPTY_PRODUCT_DYNAMIC, ready: false, presets, defaultFormat, blockedEntities, timezone, latestExport, duplicateExport, lastState };
 }
 
 // A stored preset → the shape the export UI uses (entityState + format), plus
@@ -624,6 +627,15 @@ export async function action({ request }) {
 
   // Save / delete a named export preset (server-persisted so it sticks and can
   // be picked by a Schedule).
+  // The page remembering itself: fire-and-forget from the client, so it must
+  // never fail the request or return anything the page would re-render for.
+  if (intent === "savePageState") {
+    const { savePageState } = await import("../db/exportPreset.server.js");
+    try {
+      await savePageState(session.shop, JSON.parse(String(formData.get("state") || "{}")));
+    } catch { /* a page that can't be remembered is not worth an error */ }
+    return { stateSaved: true };
+  }
   if (intent === "renamePreset" || intent === "duplicatePreset") {
     const mod = await import("../db/exportPreset.server.js");
     const id = String(formData.get("id") || "");
@@ -889,6 +901,7 @@ export default function ExportPage() {
   const dataFetcher = useFetcher(); // lazily fetches the heavy counts + dynamic columns
   const presetFetcher = useFetcher(); // persists saved presets
   const schedFetcher = useFetcher(); // deferred "Schedule on" creation
+  const stateFetcher = useFetcher(); // remembers the page between visits
 
   // The page shell renders immediately; kick off the counts fetch on mount so
   // they populate a moment later (instead of blocking the page from opening).
@@ -934,7 +947,11 @@ export default function ExportPage() {
   );
   const dynGroupsFor = (entity) => (entity === "products" ? productDynamicGroups : EMPTY_DYN_GROUPS);
 
-  const [format, setFormat] = useState(loaderData.defaultFormat ?? "excel");
+  // The page as it was left (a hidden "__last_state" preset). Seeded into
+  // the initial state rather than applied afterwards, so the defaults never
+  // flash before the restore.
+  const remembered = loaderData.lastState ?? null;
+  const [format, setFormat] = useState(remembered?.format ?? loaderData.defaultFormat ?? "excel");
   // Advanced options card (collapsed by default).
   const [advOpen, setAdvOpen] = useState(false);
   const [advFilename, setAdvFilename] = useState("");
@@ -1035,7 +1052,7 @@ export default function ExportPage() {
   // savedPresets holds user-saved configurations. presetName backs the
   // save modal's input; lastConfig captures the most recent export so
   // "Latest Export" can restore it.
-  const [preset, setPreset] = useState("New Export");
+  const [preset, setPreset] = useState(remembered?.preset ?? "New Export");
   const [savedPresets, setSavedPresets] = useState(() => loaderData.presets ?? []);
   const [presetName, setPresetName] = useState("");
   const [lastConfig, setLastConfig] = useState(null);
@@ -1048,13 +1065,17 @@ export default function ExportPage() {
   // The page as the picked preset left it. Everything the preset would save
   // is snapshotted here when one is applied (or saved); comparing the same
   // snapshot after each change is what decides the star / Update.
-  const [baseline, setBaseline] = useState(null);
+  // Restoring the baseline restores the star too: it is the same comparison,
+  // so a page left mid-edit reopens still showing it.
+  const [baseline, setBaseline] = useState(remembered?.baseline ?? null);
   // Set to re-take the baseline on the next paint — after applying a preset
   // the new configuration only exists once React has re-rendered.
-  const rebaseline = useRef(true);
+  const rebaseline = useRef(!remembered?.baseline);
 
   // Per-entity state: { enabled, filters: {key→value}, selectedFields: string[] }
-  const [entityState, setEntityState] = useState(() => initialEntityState());
+  const [entityState, setEntityState] = useState(() => (remembered?.entityState
+    ? normalizeStateSorts(remembered.entityState)
+    : initialEntityState()));
 
   // Opened via Duplicate (?duplicate=<jobId>): load that run's configuration
   // once, ready to tweak — nothing starts until Export is clicked.
@@ -1308,6 +1329,32 @@ export default function ExportPage() {
     rebaseline.current = false;
     setBaseline(currentSignature);
   });
+
+  // The Advanced options live in ~20 separate fields, so they are written
+  // once on mount rather than seeded one by one — in a layout effect, which
+  // runs before the browser paints, so nothing shows the defaults first.
+  useLayoutEffect(() => {
+    if (remembered?.options) applyAdvancedOptions(remembered.options);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Remember the page, one write after the changes stop. The baseline rides
+  // along so the star is still there after a reload; the delivery URL never
+  // does, for the same reason a preset doesn't keep it.
+  const rememberedPayload = useRef(null);
+  useEffect(() => {
+    const options = buildAdvancedOptions();
+    delete options.deliverUrl;
+    const payload = JSON.stringify({ preset, format, entityState, options, baseline });
+    if (rememberedPayload.current === null) { rememberedPayload.current = payload; return undefined; }
+    if (rememberedPayload.current === payload) return undefined;
+    const t = setTimeout(() => {
+      rememberedPayload.current = payload;
+      stateFetcher.submit({ intent: "savePageState", state: payload }, { method: "post" });
+    }, 900);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preset, format, entityState, currentSignature, baseline]);
 
   // A duplicate's name is invented by the server (Name (2), (3) …), so the
   // list takes it from the reply rather than guessing it here.
