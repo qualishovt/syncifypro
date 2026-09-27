@@ -68,6 +68,10 @@ model BulkImportJob {
   resultUrl       String?
   resultUrlExpiry DateTime?
   errorMessage    String?
+  // The preset this run was made with, as it was NAMED at the time ("" is
+  // never stored: null means no preset). Display only — the run itself is
+  // reproduced from the spec/plan beside it, not by looking the preset up.
+  presetName      String?
   createdAt       DateTime  @default(now())
   completedAt     DateTime?
 
@@ -106,6 +110,10 @@ model BulkExportJob {
   progressCurrent Int?
   progressTotal   Int?
   errorMessage    String?
+  // The preset this run was made with, as it was NAMED at the time ("" is
+  // never stored: null means no preset). Display only — the run itself is
+  // reproduced from the spec/plan beside it, not by looking the preset up.
+  presetName      String?
   createdAt       DateTime  @default(now())
   completedAt     DateTime?
 

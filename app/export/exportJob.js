@@ -507,14 +507,14 @@ function applyValueFormatting(rows, format, options = {}) {
  * Always returns `{ mode: "job", jobId }` (or `{ mode: "bulk", jobId }`); the
  * UI polls the job either way.
  */
-export async function startExport({ admin, shop, specs, format, options = {}, jobId = undefined }) {
+export async function startExport({ admin, shop, specs, format, options = {}, jobId = undefined, presetName = null }) {
   if (!Array.isArray(specs) || specs.length === 0) {
     throw new Error("At least one entity must be selected.");
   }
   // Nothing slow happens here: the job row is created and queued immediately
   // so the UI can jump to the job page; the tracked-vs-Shopify-bulk decision
   // (an Admin count query) runs in the worker instead.
-  return startTrackedExport({ admin, shop, specs, format, options, jobId });
+  return startTrackedExport({ admin, shop, specs, format, options, jobId, presetName });
 }
 
 /**
@@ -557,7 +557,7 @@ async function safeCount(admin, entity) {
   }
 }
 
-async function startTrackedExport({ admin, shop, specs, format, options = {}, jobId = undefined }) {
+async function startTrackedExport({ admin, shop, specs, format, options = {}, jobId = undefined, presetName = null }) {
   let job;
   try {
     job = await createBulkExportJob({
@@ -572,6 +572,8 @@ async function startTrackedExport({ admin, shop, specs, format, options = {}, jo
       // worker later routes this job to a Shopify bulk operation.
       fields: specs.length === 1 && specs[0].fields ? specs[0].fields.join(",") : null,
       progressTotal: null,
+      // Which preset the merchant had picked when they pressed Export.
+      presetName,
     });
   } catch (err) {
     // The optimistic job page retries its start on refresh — same id landing

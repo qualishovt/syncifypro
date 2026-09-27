@@ -416,6 +416,8 @@ export async function action({ request }) {
       progressTotal: totals.importableRecords ?? totals.importable,
       plan,      // persisted so Repeat/scheduling reuse the same per-sheet config
       options,
+      // What the merchant had picked when they pressed Import.
+      presetName: String(formData.get("runPresetName") || ""),
     };
     // Prefer arming the preview's "ready" row (keeps the number the merchant
     // already saw); fall back to a fresh row when there isn't one.
@@ -783,6 +785,8 @@ function ImportPage() {
     if (planArg) fd.set("plan", JSON.stringify(planArg));
     fd.set("importMode", importMode);
     fd.set("options", JSON.stringify(jobOptions()));
+    // Recorded on the run so Activity can say what it was made with.
+    fd.set("runPresetName", presets.find((p) => p.id === presetId)?.name ?? "");
     // Arm the preview's ready row so the run keeps the number shown up front.
     if (readyJob?.id) fd.set("readyJobId", readyJob.id);
     fetcher.submit(fd, { method: "post" });

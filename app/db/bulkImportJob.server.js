@@ -20,7 +20,7 @@ import { nextJobNumber } from "./jobNumber.server.js";
  */
 export async function createImportJob({
   shop, entity, format, filename = null, sourceR2Key, progressTotal = null,
-  plan = null, options = null, status = "pending",
+  plan = null, options = null, status = "pending", presetName = null,
 }) {
   // Assign the shared per-shop job number + create in one transaction.
   return db.$transaction(async (tx) => {
@@ -28,6 +28,7 @@ export async function createImportJob({
     return tx.bulkImportJob.create({
       data: {
         shop, entity, format, filename, sourceR2Key, number,
+        presetName: presetName || null,
         status,
         progressCurrent: 0,
         progressTotal,
@@ -56,7 +57,7 @@ export async function createReadyImportJob({ shop, format, filename, sourceR2Key
  * Returns null if the row isn't this shop's ready job (caller then creates
  * a fresh one — e.g. the row was already imported once).
  */
-export async function armReadyImportJob({ id, shop, entity, format, filename, progressTotal, plan, options }) {
+export async function armReadyImportJob({ id, shop, entity, format, filename, progressTotal, plan, options, presetName = null }) {
   const row = await db.bulkImportJob.findUnique({ where: { id } });
   if (!row || row.shop !== shop || row.status !== "ready") return null;
   return db.bulkImportJob.update({
@@ -68,6 +69,7 @@ export async function armReadyImportJob({ id, shop, entity, format, filename, pr
       progressTotal,
       plan: plan == null ? null : JSON.stringify(plan),
       options: options == null ? null : JSON.stringify(options),
+      presetName: presetName || null,
       // The run starts NOW — createdAt is "Started" on the info card.
       createdAt: new Date(),
     },

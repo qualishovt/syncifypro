@@ -1531,6 +1531,8 @@ export default function ExportPage() {
           format,
           specs: buildSpecs(),
           options: buildAdvancedOptions(),
+          // Recorded on the run so Activity can say what it was made with.
+          presetName: preset,
           // Scheduling lives entirely behind the "Run on a schedule" switch,
           // which defers via createInlineSchedule — plain exports carry none.
           schedule: null,

@@ -162,6 +162,7 @@ export async function action({ request, params }) {
         format: payload.format || "csv",
         options: payload.options ?? {},
         jobId: id,
+        presetName: payload.presetName ?? null,
       });
       // Inline scheduling: the export ALSO becomes a schedule with this exact
       // configuration. Delivery defaults to saving in the app; destinations

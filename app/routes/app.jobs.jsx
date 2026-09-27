@@ -157,6 +157,7 @@ const titleCase = (s) => String(s ?? "").split(",").map((slug) => {
 function exportRow(j) {
   return {
     id: j.id, type: "export", number: j.number ?? null,
+    presetName: j.presetName ?? null,
     name: j.filename || titleCase(j.entity),
     format: j.format, status: j.status,
     detail: j.rowCount != null ? `${j.rowCount.toLocaleString()} rows` : "—",
@@ -180,6 +181,7 @@ function importRow(j) {
     : `/app/import?jobId=${encodeURIComponent(j.id)}`;
   return {
     id: j.id, type: "import", number: j.number ?? null,
+    presetName: j.presetName ?? null,
     name: (j.filename || titleCase(j.entity) || "import").replace(/\.[^.]+$/, ""),
     format: j.format, status: j.status,
     detail: j.status === "ready"
@@ -369,6 +371,7 @@ export default function JobsPage() {
               <s-table-header listSlot="primary">Name</s-table-header>
               <s-table-header>Type</s-table-header>
               <s-table-header>Format</s-table-header>
+              <s-table-header>Preset</s-table-header>
               <s-table-header>Status</s-table-header>
               <s-table-header>Result</s-table-header>
               <s-table-header>Started</s-table-header>
@@ -399,6 +402,14 @@ export default function JobsPage() {
                       </s-badge>
                     </s-table-cell>
                     <s-table-cell>{String(j.format || "").toUpperCase()}</s-table-cell>
+                    {/* What the run was made with. A run from before this was
+                        recorded, or one started from a schedule, shows a dash
+                        rather than claiming "no preset". */}
+                    <s-table-cell>
+                      {j.presetName
+                        ? j.presetName
+                        : <s-text color="subdued">—</s-text>}
+                    </s-table-cell>
                     <s-table-cell>
                       <s-badge tone={STATUS_TONE[j.status]}>{STATUS_LABEL[j.status] ?? j.status}</s-badge>
                     </s-table-cell>

@@ -38,6 +38,7 @@ import { nextJobNumber } from "./jobNumber.server.js";
  */
 export async function createBulkExportJob({
   id = undefined, shop, entity, format, fields = null, spec = null, filename = null, progressTotal = null,
+  presetName = null,
 }) {
   // Assign the shared per-shop job number + create in one transaction.
   // `id` may be supplied by the caller (the job page navigates optimistically
@@ -47,6 +48,7 @@ export async function createBulkExportJob({
     return tx.bulkExportJob.create({
       data: {
         id, shop, entity, format, fields, status: "pending", number,
+        presetName: presetName || null,
         spec:     spec ? JSON.stringify(spec) : null,
         filename: filename ?? null,
         progressCurrent: 0,
