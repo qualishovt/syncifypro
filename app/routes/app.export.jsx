@@ -1026,7 +1026,18 @@ export default function ExportPage() {
   // other format restores whatever was selected before.
   const feedLock = format === "google_feed";
   const preFeedSelection = useRef(null);
+  // Applying a preset sets the format AND the entities in one go, so this
+  // sync must sit that transition out: left to run, it would restore the
+  // selection from before the feed over the preset's own — and its extra
+  // state update would land after the baseline was taken, making a freshly
+  // applied preset look changed.
+  const skipFeedSync = useRef(false);
   useEffect(() => {
+    if (skipFeedSync.current) {
+      skipFeedSync.current = false;
+      preFeedSelection.current = null;
+      return;
+    }
     if (format === "google_feed") {
       setEntityState((prev) => {
         preFeedSelection.current = Object.keys(prev).filter((e) => prev[e].enabled);
@@ -1240,6 +1251,7 @@ export default function ExportPage() {
    * preset of the merchant's own rather than writing back into the template.
    */
   function applyTemplate(t) {
+    skipFeedSync.current = true;
     setPreset(t.name);
     setTemplateId(t.id);
     rebaseline.current = true;
@@ -1251,6 +1263,7 @@ export default function ExportPage() {
   }
 
   function applyPreset(name) {
+    skipFeedSync.current = true;
     setPreset(name);
     setTemplateId("");
     // The applied configuration only exists after the next render, so the
@@ -2665,7 +2678,9 @@ function PresetRow({
     );
   }
   return (
-    <s-grid gridTemplateColumns="1fr auto auto auto" gap="small-100" alignItems="center">
+    // The name takes the room; the three actions sit together at the end as
+    // one group — a column each would space them across the whole row.
+    <s-grid gridTemplateColumns="1fr auto" gap="small-100" alignItems="center">
       <s-clickable
         onClick={onApply}
         command="--hide"
@@ -2679,9 +2694,11 @@ function PresetRow({
           <span style={selected ? { fontWeight: 700 } : undefined}>{p.name}</span>
         </s-grid>
       </s-clickable>
-      <s-button variant="tertiary" icon="edit" accessibilityLabel={`Rename ${p.name}`} onClick={onStartRename} />
-      <s-button variant="tertiary" icon="duplicate" accessibilityLabel={`Duplicate ${p.name}`} onClick={onDuplicate} />
-      <s-button variant="tertiary" icon="delete" accessibilityLabel={`Delete ${p.name}`} onClick={onAskDelete} />
+      <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
+        <s-button variant="tertiary" icon="edit" accessibilityLabel={`Rename ${p.name}`} onClick={onStartRename} />
+        <s-button variant="tertiary" icon="duplicate" accessibilityLabel={`Duplicate ${p.name}`} onClick={onDuplicate} />
+        <s-button variant="tertiary" icon="delete" accessibilityLabel={`Delete ${p.name}`} onClick={onAskDelete} />
+      </div>
     </s-grid>
   );
 }
