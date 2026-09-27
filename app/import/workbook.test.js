@@ -162,3 +162,76 @@ test("a plain CSV is analyzed as a single unnamed sheet", () => {
   assert.equal(sheets[0].detection.via, "columns");
   assert.equal(totals.importable, 1);
 });
+
+// ─── Column decisions (a preset meeting a file that changed) ──────────────────
+
+/** One Products sheet whose columns are given, so a file can "gain" one. */
+function productsWorkbook(columns) {
+  const row = { product_id: "gid://x/1", command: "", handle: "shirt", title: "Blue Shirt", vendor: "Acme", product_type: "Tee" };
+  const picked = {};
+  for (const c of columns) picked[c] = row[c] ?? "";
+  return toExcelWorkbook([{ name: "Products", rows: [picked], columns }]);
+}
+
+const productRow = (sheets) => sheets.find((s) => s.name === "Products").validRows[0];
+
+test("a column left out is not handed to the writer", () => {
+  const { sheets } = analyzeWorkbook({
+    fileBuffer: productsWorkbook(["product_id", "command", "handle", "title", "vendor"]),
+    format: "xlsx",
+    plan: [{ entity: "products", include: true, excludeColumns: ["vendor"] }],
+  });
+  const row = productRow(sheets);
+  assert.equal(row.vendor, undefined);
+  assert.equal(row.title, "Blue Shirt");
+});
+
+test("a column the plan never saw is still imported", () => {
+  // The plan was saved when the file had no product_type; it must not be
+  // dropped just because the plan doesn't mention it.
+  const { sheets } = analyzeWorkbook({
+    fileBuffer: productsWorkbook(["product_id", "command", "handle", "title", "product_type"]),
+    format: "xlsx",
+    plan: [{ entity: "products", include: true, excludeColumns: ["vendor"] }],
+  });
+  assert.equal(productRow(sheets).product_type, "Tee");
+});
+
+test("identity and Command survive being unticked", () => {
+  const { sheets } = analyzeWorkbook({
+    fileBuffer: productsWorkbook(["product_id", "command", "handle", "title"]),
+    format: "xlsx",
+    plan: [{ entity: "products", include: true, excludeColumns: ["handle", "command", "product_id"] }],
+  });
+  const row = productRow(sheets);
+  assert.equal(row.handle, "shirt", "handle identifies the record");
+  assert.ok("command" in row, "Command drives create/update/delete");
+});
+
+test("a legacy kept-columns plan still keeps only those columns", () => {
+  const { sheets } = analyzeWorkbook({
+    fileBuffer: productsWorkbook(["product_id", "command", "handle", "title", "vendor"]),
+    format: "xlsx",
+    plan: [{ entity: "products", include: true, columns: ["title"] }],
+  });
+  const row = productRow(sheets);
+  assert.equal(row.title, "Blue Shirt");
+  assert.equal(row.vendor, undefined);
+});
+
+test("column order in the file does not matter — matching is by name", () => {
+  const forward = analyzeWorkbook({
+    fileBuffer: productsWorkbook(["product_id", "command", "handle", "title", "vendor"]),
+    format: "xlsx",
+    plan: [{ entity: "products", include: true, excludeColumns: ["vendor"] }],
+  });
+  const shuffled = analyzeWorkbook({
+    fileBuffer: productsWorkbook(["vendor", "title", "handle", "command", "product_id"]),
+    format: "xlsx",
+    plan: [{ entity: "products", include: true, excludeColumns: ["vendor"] }],
+  });
+  assert.deepEqual(
+    Object.keys(productRow(forward.sheets)).sort(),
+    Object.keys(productRow(shuffled.sheets)).sort(),
+  );
+});

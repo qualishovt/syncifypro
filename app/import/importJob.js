@@ -116,7 +116,7 @@ const SAMPLE_ROW_COUNT = 5;
  * @param {string} [options.entity="auto"] - entity key, or "auto" to detect
  * @returns {object} per-sheet analysis
  */
-export function analyzeSheet({ rawRows, name = null, entity = "auto", include = true, filters = null, selectedColumns = null, blockedEntities = [] }) {
+export function analyzeSheet({ rawRows, name = null, entity = "auto", include = true, filters = null, selectedColumns = null, excludedColumns = null, blockedEntities = [] }) {
   const rawHeaders = rawRows.length > 0 ? Object.keys(rawRows[0]) : [];
 
   // Explicit "ignore" (user unticked the sheet) — report it, import nothing.
@@ -188,7 +188,7 @@ export function analyzeSheet({ rawRows, name = null, entity = "auto", include = 
   const filtered = applyRowFilters(allRows, filters);
   // Column selection (from the plan) strips unselected fields so the writer
   // only touches the columns the merchant chose (identity + Command always kept).
-  const rows = selectColumns(filtered, resolvedEntity, selectedColumns);
+  const rows = selectColumns(filtered, resolvedEntity, selectedColumns, excludedColumns);
   const { valid, errors: validationErrors } = validator(rows);
 
   // Filterable/selectable columns: humanized label → the snake_case key.
@@ -240,13 +240,32 @@ const LEGACY_FILTER_OPS = {
 const ALWAYS_KEEP = ["command", "top_row"];
 
 /**
- * Keep only the selected columns on every row (plus identity + structural keys),
- * so the writer leaves unselected fields on the existing object untouched.
- * `columns` is a list of snake_case keys; null/empty means keep everything.
+ * Narrow what the writer touches, so unselected fields stay as they are on the
+ * existing object. Two ways of saying it, because they mean different things
+ * when the file changes:
+ *
+ * - `excluded`: the columns deliberately left out. Anything else is imported,
+ *   INCLUDING a column this plan never saw — a preset from last week must not
+ *   silently drop a column this week's file added.
+ * - `columns` (legacy): the columns to keep, from plans saved before the
+ *   above. A column missing from that list is dropped, as it was then.
+ *
+ * Identity and structural keys (Command, Top Row, handle/id) survive either
+ * way: without them a row can't be matched or assembled.
  */
-function selectColumns(rows, entity, columns) {
+function selectColumns(rows, entity, columns, excluded) {
+  const pinned = new Set([...ALWAYS_KEEP, ...identityKeys(entity)]);
+  if (excluded?.length) {
+    const drop = new Set(excluded.filter((k) => !pinned.has(k)));
+    if (drop.size === 0) return rows;
+    return rows.map((r) => {
+      const out = {};
+      for (const k of Object.keys(r)) if (!drop.has(k)) out[k] = r[k];
+      return out;
+    });
+  }
   if (!columns || columns.length === 0) return rows;
-  const keep = new Set([...columns, ...ALWAYS_KEEP, ...identityKeys(entity)]);
+  const keep = new Set([...columns, ...pinned]);
   return rows.map((r) => {
     const out = {};
     for (const k of Object.keys(r)) if (keep.has(k)) out[k] = r[k];
@@ -305,6 +324,7 @@ export function analyzeWorkbook({ fileBuffer, format, entity = "auto", plan = nu
         include: p?.include ?? true,
         filters: p?.filters ?? null,
         selectedColumns: p?.columns ?? null,
+        excludedColumns: p?.excludeColumns ?? null,
         blockedEntities,
       });
     });

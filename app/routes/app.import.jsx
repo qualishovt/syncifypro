@@ -799,8 +799,12 @@ function ImportPage() {
   // behind a short pause — ticking five boxes costs one request, not five.
   const columnTimer = useRef(null);
   useEffect(() => () => clearTimeout(columnTimer.current), []);
-  function updatePlanColumns(i, columns) {
-    const next = plan.map((p, idx) => (idx === i ? { ...p, columns } : p));
+  function updatePlanColumns(i, excludeColumns) {
+    // Writing the decision drops any legacy kept-columns list on that sheet:
+    // the two say different things and only one may be in force.
+    const next = plan.map((p, idx) => (idx === i
+      ? { ...p, excludeColumns, columns: undefined }
+      : p));
     setPlan(next);
     clearTimeout(columnTimer.current);
     columnTimer.current = setTimeout(() => submit("analyze", next), 600);
@@ -1962,17 +1966,21 @@ function SheetCard({ sheet, plan, sheetIndex, onPlan, onFilters, onColumns, disa
     if (r) setListMaxH(Math.max(160, window.innerHeight - r.bottom - 24));
   };
 
-  // Column selection lives in the plan as a list of selected keys; null means
-  // "import every column". Toggling one off narrows what the writer touches.
+  // The plan records the columns deliberately LEFT OUT, not the ones kept:
+  // that way a file that gained a column since the preset was saved still
+  // imports it, instead of the preset quietly dropping what it never saw.
+  // A plan from before this (a list of kept columns) is read as "everything
+  // else was left out", so it keeps behaving as it reads.
   const allKeys = filterCols.map((c) => c.key);
-  const selected = plan.columns ?? allKeys;
-  const isSelected = (key) => selected.includes(key);
+  const excluded = plan.excludeColumns
+    ?? (plan.columns ? allKeys.filter((k) => !plan.columns.includes(k)) : []);
+  const isSelected = (key) => !excluded.includes(key);
   const toggleColumn = (key) => {
-    const next = isSelected(key) ? selected.filter((k) => k !== key) : [...selected, key];
-    // Store null when everything is back on, so the plan stays "import all".
-    onColumns(next.length === allKeys.length ? null : next);
+    const next = isSelected(key) ? [...excluded, key] : excluded.filter((k) => k !== key);
+    // Store null when nothing is left out, so the plan stays "import all".
+    onColumns(next.length === 0 ? null : next);
   };
-  const excludedCount = allKeys.length - selected.length;
+  const excludedCount = excluded.length;
 
   // Row filters live in the plan; edits re-analyze. Value typing updates locally
   // and re-analyzes on blur to avoid a request per keystroke.
