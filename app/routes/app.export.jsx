@@ -1322,7 +1322,9 @@ export default function ExportPage() {
   // Save the current configuration as a named preset — persisted server-side so
   // it survives reloads and can be picked by a Schedule.
   function savePreset(overrideName) {
-    const name = String(overrideName ?? presetName).trim();
+    // Only a real string counts as an override: handed a click event (an easy
+    // mistake from an onClick), fall back to the name typed in the dialog.
+    const name = (typeof overrideName === "string" ? overrideName : presetName).trim();
     if (!name) return;
     const spec = buildSpecs();
     // Ad-hoc URL credentials must never persist — presets keep the rest.
@@ -1840,10 +1842,12 @@ export default function ExportPage() {
               onChange={setPresetName}
               placeholder="e.g. Weekly products"
             />
+            {/* Wrapped: passing savePreset directly would hand it the click
+                event, which it would take as the name to save under. */}
             <s-button
               slot="primary-action"
               variant="primary"
-              onClick={savePreset}
+              onClick={() => savePreset()}
               command="--hide"
               commandFor="save-preset-modal"
             >
