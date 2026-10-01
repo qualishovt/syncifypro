@@ -139,6 +139,7 @@ function buildSheetXml(rows, cols) {
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
     '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
     `<sheetViews><sheetView workbookViewId="0">${pane}</sheetView></sheetViews>`,
+    colsXml(rows, cols),
     "<sheetData>",
   ];
 
@@ -154,6 +155,49 @@ function buildSheetXml(rows, cols) {
 
 // cellXfs index of the bold light-blue header style in STYLES_XML.
 const HEADER_STYLE = 1;
+
+// Column widths are in characters. Excel has no "fit to contents" instruction
+// in the file itself — a sheet opens at whatever width the file states, and
+// stating nothing means the 8.43-character default for every column, which is
+// why exports opened with the text cut off.
+const MIN_COL_WIDTH = 9;   // about the default: short columns still look normal
+const MAX_COL_WIDTH = 60;  // a description column must not become a wall
+const WIDTH_PADDING = 2;   // room for the header's filter arrow and a margin
+
+/**
+ * The longest line in a value. Measuring the whole string would let one
+ * multi-line description (body_html) speak for a column that is otherwise
+ * short — Excel wraps on newlines, so only the longest line needs to fit.
+ */
+function longestLine(value) {
+  const s = String(value);
+  if (!s.includes("\n")) return s.length;
+  let longest = 0;
+  for (const line of s.split("\n")) if (line.length > longest) longest = line.length;
+  return longest;
+}
+
+/**
+ * `<cols>` sized to each column's widest content (header included), clamped
+ * so nothing opens hidden or absurd. Scanning stops for a column as soon as
+ * it is already at the maximum, so a wide column costs nothing to measure.
+ */
+function colsXml(rows, cols) {
+  if (cols.length === 0) return "";
+  const entries = cols.map((c, i) => {
+    let longest = longestLine(columnHeader(c) ?? "");
+    for (const row of rows) {
+      if (longest + WIDTH_PADDING >= MAX_COL_WIDTH) break;
+      const v = row[c];
+      if (v == null || v === "") continue;
+      const len = longestLine(v);
+      if (len > longest) longest = len;
+    }
+    const width = Math.min(Math.max(longest + WIDTH_PADDING, MIN_COL_WIDTH), MAX_COL_WIDTH);
+    return `<col min="${i + 1}" max="${i + 1}" width="${width}" customWidth="1"/>`;
+  });
+  return `<cols>${entries.join("")}</cols>`;
+}
 
 function rowXml(rowNumber, values, styleId) {
   const s = styleId ? ` s="${styleId}"` : "";
