@@ -17,6 +17,20 @@
  * renamed. No subscription at all (or a billing API error) means Basic.
  */
 
+/**
+ * Everything is free, with no limits, while the app is earning its first
+ * installs: a price is one more reason not to try an app nobody has reviewed
+ * yet. The tiers below are left exactly as they are, so charging comes back
+ * by setting this to false — and restoring the plan prices in the Partner
+ * dashboard, which is where merchants are actually billed.
+ */
+export const EVERYTHING_FREE = true;
+
+/** What every shop gets while the app is free: all of it. */
+const FREE_FOR_ALL = {
+  planName: "Free", paid: false, rowLimit: null, schedules: true, migrations: true,
+};
+
 // rowLimit: max rows per import/export job; null = unlimited.
 const TIERS = {
   basic:      { planName: "Basic",      paid: false, rowLimit: 100,     schedules: false, migrations: false },
@@ -36,6 +50,9 @@ const PLAN_QUERY = `#graphql
 
 /** The merchant's plan, from the live subscription state. Fails closed to Basic. */
 export async function getPlan(admin) {
+  // Free for everyone: no subscription lookup, so a merchant who never picks
+  // a plan is never capped, and nothing depends on the billing API answering.
+  if (EVERYTHING_FREE) return { ...FREE_FOR_ALL };
   try {
     const res = await admin.graphql(PLAN_QUERY);
     const body = await res.json();

@@ -136,9 +136,9 @@ export async function loader({ request }) {
   } catch { /* keep default */ }
 
   // Current plan (Managed Pricing) + the plan-selection page for this shop.
-  const { getPlan, planPageUrl } = await import("../billing.server.js");
+  const { getPlan, planPageUrl, EVERYTHING_FREE } = await import("../billing.server.js");
   const planInfo = await getPlan(admin);
-  const plan = { ...planInfo, url: planPageUrl(session.shop) };
+  const plan = { ...planInfo, url: planPageUrl(session.shop), everythingFree: EVERYTHING_FREE };
 
   return { settings, scopes, appInfo, plan };
 }
@@ -503,6 +503,37 @@ const PLAN_TIERS = [
 function PlanCard({ plan }) {
   const currentName = plan?.planName ?? "Basic";
   const openPlans = () => window.open(plan.url, "_top");
+
+  // While the app is free there is nothing to choose and nothing to pay, so
+  // the tier table would only invite a merchant to buy what they already have.
+  if (plan?.everythingFree) {
+    return (
+      <Card heading="Plan" description="Everything in SyncifyPro is free to use.">
+        <s-stack direction="block" gap="base">
+          <s-stack direction="inline" gap="small-300" alignItems="center">
+            <s-heading>Free</s-heading>
+            <s-badge tone="success">Current</s-badge>
+          </s-stack>
+          <s-stack direction="block" gap="small-300">
+            {[
+              "Unlimited rows per export and import",
+              "Every entity, filter and column option",
+              "Scheduled exports and imports, delivered where you choose",
+              "Migrations from other platforms",
+            ].map((f) => (
+              <s-stack key={f} direction="inline" gap="small-300" alignItems="start">
+                <s-icon type="check" tone="success" />
+                <div style={{ flex: 1, minWidth: 0 }}><s-text>{f}</s-text></div>
+              </s-stack>
+            ))}
+          </s-stack>
+          <s-text color="subdued">
+            No card, no trial to expire. If paid plans return, you&rsquo;ll be told before anything changes.
+          </s-text>
+        </s-stack>
+      </Card>
+    );
+  }
 
   return (
     <Card heading="Plan" description="Pick a plan below — billing is handled by Shopify, and the plan page opens in the admin.">
