@@ -556,7 +556,7 @@ function PlanCard({ plan }) {
       {/* One button, not one per card: with Managed Pricing the app can't
           pre-select a plan, so per-plan buttons made merchants choose twice. */}
       <s-stack direction="inline" gap="base" alignItems="center">
-        <s-button variant="primary" onClick={openPlans}>Change plan on Shopify</s-button>
+        <s-button variant="primary" onClick={openPlans}>Change plan</s-button>
         <s-text color="subdued">You&rsquo;re on {currentName}. Choose and confirm the new plan on the next page.</s-text>
       </s-stack>
       </s-stack>
