@@ -1,27 +1,64 @@
 /**
- * While the app is free, nothing may cap a merchant: no row limit, and the
- * scheduling/migration gates must pass without a subscription of any kind.
+ * Plan gating. The app charges again, so these cover what getPlan() makes of
+ * the live subscription state — including the two ways it must fail safely:
+ * an unrecognised plan name over-delivers, a broken billing API under-delivers.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { getPlan, EVERYTHING_FREE } from "./billing.server.js";
+import { getPlan, EVERYTHING_FREE, FREE_ROW_LIMIT } from "./billing.server.js";
 
-// An admin client that would FAIL if it were called — while the app is free,
-// the plan must not depend on Shopify answering a billing query at all.
-const explodingAdmin = { graphql: () => { throw new Error("billing API must not be consulted while free"); } };
+/** An admin client answering the subscription query with `subs`. */
+const adminWith = (subs) => ({
+  graphql: async () => ({
+    json: async () => ({ data: { currentAppInstallation: { activeSubscriptions: subs } } }),
+  }),
+});
 
-test("a shop with no subscription gets everything", async () => {
-  const plan = await getPlan(explodingAdmin);
-  assert.equal(plan.rowLimit, null, "no row cap");
+const active = (name) => [{ name, status: "ACTIVE", test: false }];
+
+test("no subscription means Basic limits", async () => {
+  const plan = await getPlan(adminWith([]));
+  assert.equal(plan.planName, "Basic");
+  assert.equal(plan.rowLimit, FREE_ROW_LIMIT);
+  assert.equal(plan.schedules, false);
+  assert.equal(plan.migrations, false);
+});
+
+test("an active plan is matched by name, whatever its case", async () => {
+  for (const name of ["Pro", "pro", "  PRO  "]) {
+    const plan = await getPlan(adminWith(active(name)));
+    assert.equal(plan.planName, "Pro", `"${name}" should match the Pro tier`);
+    assert.equal(plan.rowLimit, 10_000);
+    assert.equal(plan.schedules, true);
+  }
+});
+
+test("the paid tiers carry their own row limits", async () => {
+  assert.equal((await getPlan(adminWith(active("Max")))).rowLimit, 100_000);
+  assert.equal((await getPlan(adminWith(active("Enterprise")))).rowLimit, null);
+});
+
+test("a cancelled subscription is not an active one", async () => {
+  const plan = await getPlan(adminWith([{ name: "Pro", status: "CANCELLED", test: false }]));
+  assert.equal(plan.planName, "Basic", "only ACTIVE subscriptions count");
+});
+
+test("an unrecognised plan name over-delivers rather than capping a payer", async () => {
+  const plan = await getPlan(adminWith(active("Agency Annual")));
+  assert.equal(plan.rowLimit, null, "a renamed plan must not cap someone who is paying");
   assert.equal(plan.schedules, true);
-  assert.equal(plan.migrations, true);
-  assert.equal(plan.paid, false);
+  assert.equal(plan.planName, "Agency Annual", "and keeps its own name for the UI");
 });
 
-test("the free switch is what drives it", () => {
-  assert.equal(EVERYTHING_FREE, true, "flip this (and the Partner dashboard prices) to charge again");
+test("a billing API failure falls back to Basic instead of taking the app down", async () => {
+  const exploding = { graphql: () => { throw new Error("billing API down"); } };
+  const plan = await getPlan(exploding);
+  assert.equal(plan.planName, "Basic");
+  assert.equal(plan.rowLimit, FREE_ROW_LIMIT);
 });
 
-test("the plan reports itself as Free, for the UI to show", async () => {
-  assert.equal((await getPlan(explodingAdmin)).planName, "Free");
+test("the free kill switch is off", () => {
+  // If this ever fails, the Partner dashboard plans must come down in the same
+  // change — paid plans plus a free-for-all flag bills merchants for nothing.
+  assert.equal(EVERYTHING_FREE, false);
 });

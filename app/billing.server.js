@@ -18,13 +18,17 @@
  */
 
 /**
- * Everything is free, with no limits, while the app is earning its first
- * installs: a price is one more reason not to try an app nobody has reviewed
- * yet. The tiers below are left exactly as they are, so charging comes back
- * by setting this to false — and restoring the plan prices in the Partner
- * dashboard, which is where merchants are actually billed.
+ * Kill switch for all plan gating: true hands every shop everything, free.
+ * It was on briefly (2026-10-03) to drop the price while the app earned its
+ * first installs, and off again the next day.
+ *
+ * Both halves have to move together. This flag alone, with the paid plans
+ * still live in the Partner dashboard, charges merchants for limits the code
+ * is ignoring. Removing the plans alone caps every shop at Basic with no way
+ * to upgrade. Turning charging off means this true AND the paid plans gone;
+ * turning it back on means the plans recreated BEFORE this goes false.
  */
-export const EVERYTHING_FREE = true;
+export const EVERYTHING_FREE = false;
 
 /** What every shop gets while the app is free: all of it. */
 const FREE_FOR_ALL = {
