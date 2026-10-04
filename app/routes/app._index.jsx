@@ -409,7 +409,7 @@ export default function Home() {
 
             {/* ── Import from URL: saved servers prefill the URL input; the "+"
                 opens the Servers page (prefetched, so the jump is instant). */}
-            <PrefetchPageLinks page="/app/servers" />
+            <PrefetchPageLinks page="/app/settings" />
             <s-grid gridTemplateColumns="auto 1fr auto" gap="small-200" alignItems="center">
               {/* Popover server picker (same pattern as the run page's
                   Deliver-to): Direct URL, Add a new server, saved servers. */}
@@ -452,7 +452,7 @@ export default function Home() {
                     />
                     {/* Navigates — adding a server lives on its own page. */}
                     <s-clickable
-                      onClick={() => { setAddingServer(true); navigate("/app/servers"); }}
+                      onClick={() => { setAddingServer(true); navigate("/app/settings?section=servers"); }}
                       padding="small-200"
                       borderRadius="base"
                     >

@@ -640,7 +640,7 @@ export default function JobPage() {
           </div>
 
           {/* On-demand delivery, right in the banner. */}
-          <PrefetchPageLinks page="/app/servers" />
+          <PrefetchPageLinks page="/app/settings" />
           <div style={{ marginTop: "1.25rem" }}>
             <span style={deliverLabel}>Deliver to</span>
             <div style={fieldHelpWrap}>
@@ -689,7 +689,7 @@ export default function JobPage() {
                       />
                       {/* Navigates — adding a server lives on its own page. */}
                       <s-clickable
-                        onClick={() => { setAddingServer(true); navigate("/app/servers"); }}
+                        onClick={() => { setAddingServer(true); navigate("/app/settings?section=servers"); }}
                         padding="small-200"
                         borderRadius="base"
                       >

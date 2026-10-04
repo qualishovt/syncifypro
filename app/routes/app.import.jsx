@@ -1081,7 +1081,7 @@ function ImportPage() {
                         />
                         {/* Navigates — adding a server lives on its own page. */}
                         <s-clickable
-                          onClick={() => { setAddingServer(true); navigate("/app/servers"); }}
+                          onClick={() => { setAddingServer(true); navigate("/app/settings?section=servers"); }}
                           padding="small-200"
                           borderRadius="base"
                         >
@@ -1788,7 +1788,7 @@ function ImportPage() {
                             />
                             {/* Navigates — adding a server lives on its own page. */}
                             <s-clickable
-                              onClick={() => { setAddingServer(true); navigate("/app/servers"); }}
+                              onClick={() => { setAddingServer(true); navigate("/app/settings?section=servers"); }}
                               padding="small-200"
                               borderRadius="base"
                             >

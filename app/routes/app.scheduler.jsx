@@ -1008,13 +1008,13 @@ export default function SchedulerPage() {
             {form.type === "import" && (
               <s-stack direction="block" gap="small">
                 {/* Prefetch the Servers page so "Add new URL…" / "+" jump instantly. */}
-                <PrefetchPageLinks page="/app/servers" />
+                <PrefetchPageLinks page="/app/settings" />
                 <s-grid gridTemplateColumns="auto 1fr auto" gap="small-200" alignItems="center">
                   <PolarisSelect
                     label="Server"
                     labelAccessibilityVisibility="exclusive"
                     value={form.sourceServerId}
-                    onChange={(v) => (v === "__add__" ? navigate("/app/servers") : set({ sourceServerId: v }))}
+                    onChange={(v) => (v === "__add__" ? navigate("/app/settings?section=servers") : set({ sourceServerId: v }))}
                   >
                     <s-option value="">Direct URL</s-option>
                     <s-option value="__add__">Add new URL…</s-option>
@@ -1042,7 +1042,7 @@ export default function SchedulerPage() {
                       interestFor="sched-add-server-tip"
                       icon="plus"
                       accessibilityLabel="Add a new server"
-                      onClick={() => navigate("/app/servers")}
+                      onClick={() => navigate("/app/settings?section=servers")}
                     />
                   </span>
                 </s-grid>
@@ -1263,7 +1263,7 @@ export default function SchedulerPage() {
                           />
                           {/* Navigates — adding a server lives on its own page. */}
                           <s-clickable
-                            onClick={() => { setAddingServer(true); navigate("/app/servers"); }}
+                            onClick={() => { setAddingServer(true); navigate("/app/settings?section=servers"); }}
                             padding="small-200"
                             borderRadius="base"
                           >
@@ -1417,7 +1417,7 @@ export default function SchedulerPage() {
                     label="Server"
                     value={form.s3ServerId || "manual"}
                     onChange={(v) => {
-                      if (v === "__add__") navigate("/app/servers");
+                      if (v === "__add__") navigate("/app/settings?section=servers");
                       else set({ s3ServerId: s3Servers.some((s) => s.id === v) ? v : "" });
                     }}
                   >

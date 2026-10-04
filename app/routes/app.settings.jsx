@@ -12,11 +12,12 @@
  * Everything persists to AppSettings (one row per shop).
  */
 
-import { useState } from "react";
-import { useFetcher, useLoaderData } from "react-router";
+import { useEffect, useState } from "react";
+import { useFetcher, useLoaderData, useSearchParams } from "react-router";
 import { authenticate } from "../shopify.server.js";
 import PolarisSelect from "../components/PolarisSelect.jsx";
 import PolarisCheckbox from "../components/PolarisCheckbox.jsx";
+import ServersCard from "../components/ServersCard.jsx";
 import { timezoneChoices, timezoneLabel } from "../utils/timezones.js";
 
 // ─── options ─────────────────────────────────────────────────────────────────
@@ -42,11 +43,16 @@ const IMPORT_MODE_CHOICES = [
 // our own section names. Each item shows its current value as a subtitle.
 const MENU_GROUPS = [
   { title: "General", items: [
+    // Job behaviour first — what a run produces, then who hears about it —
+    // and the display-only time zone after.
     { key: "defaults",      label: "Defaults",       icon: "settings" },
-    { key: "timezone",      label: "Time zone",      icon: "clock" },
     { key: "notifications", label: "Notifications",  icon: "notification" },
+    { key: "timezone",      label: "Time zone",      icon: "clock" },
   ] },
   { title: "Files & data", items: [
+    // Servers sit here, as in Matrixify and Altera — they are where files
+    // come from and go to. Joining an existing group adds no group gap.
+    { key: "servers",       label: "Servers",        icon: "database" },
     { key: "permissions",   label: "Data access",    icon: "filter" },
     { key: "retention",     label: "File retention", icon: "calendar" },
     { key: "erasure",       label: "Clear files",    icon: "delete" },
@@ -60,6 +66,7 @@ const MENU_GROUPS = [
     { key: "about",         label: "About",          icon: "info" },
   ] },
 ];
+const MENU_KEYS = new Set(MENU_GROUPS.flatMap((g) => g.items.map((m) => m.key)));
 
 const IMPORT_MODE_LABELS = {
   normal: "Normal", updateOnly: "Update only", createOnly: "Create only",
@@ -67,8 +74,9 @@ const IMPORT_MODE_LABELS = {
 };
 
 // The one-line current-value shown under each menu item.
-function summaryFor(key, settings, scopes, plan) {
+function summaryFor(key, settings, scopes, plan, servers) {
   switch (key) {
+    case "servers":       return servers.length === 0 ? "None saved" : `${servers.length} saved`;
     case "defaults":      return `${FORMAT_CHOICES.find((f) => f.value === settings.defaultExportFormat)?.label ?? settings.defaultExportFormat} · ${IMPORT_MODE_LABELS[settings.defaultImportMode] ?? "Normal"}`;
     case "timezone":      return settings.timezone;
     case "notifications": return settings.notifyOnSuccess || settings.notifyOnError ? "On" : "Off";
@@ -140,7 +148,12 @@ export async function loader({ request }) {
   const planInfo = await getPlan(admin);
   const plan = { ...planInfo, url: planPageUrl(session.shop), everythingFree: EVERYTHING_FREE };
 
-  return { settings, scopes, appInfo, plan };
+  // Saved remote servers for the Servers section. Writes go to /app/servers,
+  // and this loader revalidates after each one, so the list stays current.
+  const { listImportServers, serializeImportServer } = await import("../db/importServer.server.js");
+  const servers = (await listImportServers(session.shop)).map(serializeImportServer);
+
+  return { settings, scopes, appInfo, plan, servers };
 }
 
 export async function action({ request }) {
@@ -188,8 +201,14 @@ export async function action({ request }) {
 // ─── page ────────────────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
-  const { settings, scopes, appInfo, plan } = useLoaderData();
-  const [active, setActive] = useState("defaults");
+  const { settings, scopes, appInfo, plan, servers } = useLoaderData();
+  // ?section= opens a specific section — the "Add server" buttons across the
+  // app land here with section=servers. Followed on change as well as on
+  // mount, in case Settings is already open when one of those links is hit.
+  const [params] = useSearchParams();
+  const fromUrl = params.get("section");
+  const [active, setActive] = useState(() => (MENU_KEYS.has(fromUrl) ? fromUrl : "defaults"));
+  useEffect(() => { if (MENU_KEYS.has(fromUrl)) setActive(fromUrl); }, [fromUrl]);
 
   return (
     <s-page heading="Settings">
@@ -200,7 +219,7 @@ export default function SettingsPage() {
             <div key={group.title} style={menuGroup}>
               {group.items.map((m) => {
                 const on = active === m.key;
-                const value = summaryFor(m.key, settings, scopes, plan);
+                const value = summaryFor(m.key, settings, scopes, plan, servers);
                 return (
                   <button
                     key={m.key}
@@ -225,6 +244,14 @@ export default function SettingsPage() {
           {active === "security"      && <SecurityCard settings={settings} />}
           {active === "notifications" && <NotificationsCard settings={settings} />}
           {active === "defaults"      && <DefaultsCard settings={settings} />}
+          {active === "servers"       && (
+            <Card
+              heading="Servers"
+              description="Saved remote servers for importing files — FTP/FTPS/SFTP hosts, HTTP(S) base URLs and Amazon S3 buckets. Pick them from the server dropdown when importing from a URL or scheduling an import; passwords and secrets are stored encrypted and never shown again."
+            >
+              <ServersCard servers={servers} />
+            </Card>
+          )}
           {active === "timezone"      && <TimezoneCard settings={settings} />}
           {active === "permissions"   && <SheetPermissionsCard settings={settings} />}
           {active === "retention"     && <RetentionCard settings={settings} />}
@@ -609,14 +636,18 @@ const layout = {
 const ACCENT = "#0d9488";
 const ACCENT_BG = "#eefaf8";
 
+// Spacing is tuned so adding a section doesn't make the menu taller: with
+// Servers in, 11 items measure ~31.3rem against ~32.9rem for the old 10. Items
+// stay ~41px tall, comfortably clickable; the gap between groups does the
+// grouping, so it can be smaller than the item padding it replaced.
 const menuCol = {
-  display: "flex", flexDirection: "column", gap: ".9rem",
-  border: "1px solid #e1e3e5", borderRadius: 12, padding: ".6rem", background: "#fff",
+  display: "flex", flexDirection: "column", gap: ".55rem",
+  border: "1px solid #e1e3e5", borderRadius: 12, padding: ".5rem", background: "#fff",
 };
 const menuGroup = { display: "flex", flexDirection: "column", gap: ".1rem" };
 const menuItem = {
   display: "flex", alignItems: "center", gap: ".55rem",
-  textAlign: "left", padding: ".45rem .6rem", border: "none",
+  textAlign: "left", padding: ".3rem .6rem", border: "none",
   background: "transparent", borderRadius: 8, cursor: "pointer", width: "100%",
 };
 const menuItemActive = { background: ACCENT_BG };
