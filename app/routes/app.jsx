@@ -22,6 +22,18 @@ export default function App() {
 
   return (
     <AppProvider embedded apiKey={apiKey}>
+      {/*
+        The admin frame and Polaris section surface are the same white, so cards
+        read as flat outlines. Put the page on the admin's subdued grey and pin
+        card surfaces to white, as ReportifyPro does. Polaris tokens first, the
+        admin's own greys as fallback if a token is ever renamed.
+      */}
+      <style>{`
+        html, body { background: var(--s-color-bg-subdued, #f1f1f1); }
+        s-section, s-box[background="base"] {
+          background: var(--s-color-bg-base, #ffffff);
+        }
+      `}</style>
       <s-app-nav>
         {/* rel="home" marks /app as the home route AND hides this link from the
             rendered menu — the app name "SyncifyPro" in the sidebar already links
