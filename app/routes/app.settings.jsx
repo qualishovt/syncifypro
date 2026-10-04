@@ -519,7 +519,8 @@ function PlanCard({ plan }) {
   }
 
   return (
-    <Card heading="Plan" description="Pick a plan below — billing is handled by Shopify, and the plan page opens in the admin.">
+    <Card heading="Plan" description="Compare the plans here. Billing runs through Shopify, so the plan itself is chosen and confirmed on Shopify's plan page.">
+      <s-stack direction="block" gap="base">
       <div style={planGrid}>
         {PLAN_TIERS.map((t) => {
           const isCurrent = t.name === currentName;
@@ -547,14 +548,18 @@ function PlanCard({ plan }) {
                     </s-stack>
                   ))}
                 </s-stack>
-                <s-button variant="primary" disabled={isCurrent || undefined} onClick={openPlans}>
-                  {isCurrent ? "Current plan" : t.name === "Basic" ? "Downgrade to Basic" : `Choose ${t.name}`}
-                </s-button>
               </s-stack>
             </s-box>
           );
         })}
       </div>
+      {/* One button, not one per card: with Managed Pricing the app can't
+          pre-select a plan, so per-plan buttons made merchants choose twice. */}
+      <s-stack direction="inline" gap="base" alignItems="center">
+        <s-button variant="primary" onClick={openPlans}>Change plan on Shopify</s-button>
+        <s-text color="subdued">You&rsquo;re on {currentName}. Choose and confirm the new plan on the next page.</s-text>
+      </s-stack>
+      </s-stack>
     </Card>
   );
 }
