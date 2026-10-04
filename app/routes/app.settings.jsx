@@ -2,7 +2,8 @@
  * app/routes/app.settings.jsx
  *
  * App settings, Matrixify-style: a left menu of sections, each opening its own
- * card on the right. Menu items are grouped by spacing only (no group headings).
+ * card on the right. The menu itself copies ReportifyPro's: a flat bordered list,
+ * icon + label per row, grey highlight on the active one, docs link at the end.
  *
  *   • Defaults       — default export format + import mode (pre-selected on those pages)
  *   • Notifications  — email + notify-on-success / notify-on-error for finished jobs
@@ -39,59 +40,23 @@ const IMPORT_MODE_CHOICES = [
   { value: "dryRun", label: "Dry run — validate, write nothing" },
 ];
 // A curated set of common IANA zones (JS Intl handles the offset/DST math).
-// Left menu grouped into categories (distinct from Matrixify's flat list), with
-// our own section names. Each item shows its current value as a subtitle.
-const MENU_GROUPS = [
-  { title: "General", items: [
-    // Job behaviour first — what a run produces, then who hears about it —
-    // and the display-only time zone after.
-    { key: "defaults",      label: "Defaults",       icon: "settings" },
-    { key: "notifications", label: "Notifications",  icon: "notification" },
-    { key: "timezone",      label: "Time zone",      icon: "clock" },
-  ] },
-  { title: "Files & data", items: [
-    // Servers sit here, as in Matrixify and Altera — they are where files
-    // come from and go to. Joining an existing group adds no group gap.
-    { key: "servers",       label: "Servers",        icon: "database" },
-    { key: "permissions",   label: "Data access",    icon: "filter" },
-    { key: "retention",     label: "File retention", icon: "calendar" },
-    { key: "erasure",       label: "Clear files",    icon: "delete" },
-  ] },
-  { title: "Security & access", items: [
-    { key: "security",      label: "Security",            icon: "lock" },
-    { key: "scopes",        label: "Permissions granted", icon: "key" },
-  ] },
-  { title: "App", items: [
-    { key: "plan",          label: "Plan",           icon: "star" },
-    { key: "about",         label: "About",          icon: "info" },
-  ] },
+// Left-menu items (master) → detail card on the right. Same order as before:
+// job behaviour, then files & data, then security, then the app itself.
+const SECTIONS = [
+  { key: "defaults",      label: "Defaults",            icon: "settings" },
+  { key: "notifications", label: "Notifications",       icon: "notification" },
+  { key: "timezone",      label: "Time zone",           icon: "clock" },
+  { key: "servers",       label: "Servers",             icon: "database" },
+  { key: "permissions",   label: "Data access",         icon: "filter" },
+  { key: "retention",     label: "File retention",      icon: "calendar" },
+  { key: "erasure",       label: "Clear files",         icon: "delete" },
+  { key: "security",      label: "Security",            icon: "lock" },
+  { key: "scopes",        label: "Permissions granted", icon: "key" },
+  { key: "plan",          label: "Plan",                icon: "star" },
+  { key: "about",         label: "About",               icon: "info" },
 ];
-const MENU_KEYS = new Set(MENU_GROUPS.flatMap((g) => g.items.map((m) => m.key)));
-
-const IMPORT_MODE_LABELS = {
-  normal: "Normal", updateOnly: "Update only", createOnly: "Create only",
-  noDelete: "Add and update", forceCreate: "Create even if exists", dryRun: "Dry run",
-};
-
-// The one-line current-value shown under each menu item.
-function summaryFor(key, settings, scopes, plan, servers) {
-  switch (key) {
-    case "servers":       return servers.length === 0 ? "None saved" : `${servers.length} saved`;
-    case "defaults":      return `${FORMAT_CHOICES.find((f) => f.value === settings.defaultExportFormat)?.label ?? settings.defaultExportFormat} · ${IMPORT_MODE_LABELS[settings.defaultImportMode] ?? "Normal"}`;
-    case "timezone":      return settings.timezone;
-    case "notifications": return settings.notifyOnSuccess || settings.notifyOnError ? "On" : "Off";
-    case "permissions": {
-      const blocked = settings.blockedEntities?.length ?? 0;
-      return blocked === 0 ? "All allowed" : `${PERMISSION_ENTITIES.length - blocked}/${PERMISSION_ENTITIES.length} allowed`;
-    }
-    case "retention":     return settings.retentionDays === 0 ? "Never" : `${settings.retentionDays} day${settings.retentionDays === 1 ? "" : "s"}`;
-    case "erasure":       return "Manual";
-    case "security":      return settings.allowExternalDownloads ? "External allowed" : "In-app only";
-    case "scopes":        return `${scopes.length} scope${scopes.length === 1 ? "" : "s"}`;
-    case "plan":          return plan?.planName ?? "Basic";
-    default:              return "";
-  }
-}
+const DOCS_URL = "https://syncifypro.app/resources/documentation";
+const MENU_KEYS = new Set(SECTIONS.map((m) => m.key));
 
 // Entities that can be allowed/blocked in Sheet Permissions. Keys match the
 // export ENTITIES list and the import entity keys, so blocking gates both.
@@ -213,31 +178,22 @@ export default function SettingsPage() {
   return (
     <s-page heading="Settings">
       <div style={layout}>
-        {/* Left menu — grouped, icon + label + current value, accent on active */}
-        <nav style={menuCol}>
-          {MENU_GROUPS.map((group) => (
-            <div key={group.title} style={menuGroup}>
-              {group.items.map((m) => {
-                const on = active === m.key;
-                const value = summaryFor(m.key, settings, scopes, plan, servers);
-                return (
-                  <button
-                    key={m.key}
-                    type="button"
-                    onClick={() => setActive(m.key)}
-                    style={{ ...menuItem, ...(on ? menuItemActive : null) }}
-                  >
-                    <span style={{ ...menuIcon, ...(on ? menuIconActive : null) }}><s-icon type={m.icon} /></span>
-                    <span style={menuText}>
-                      <span style={{ ...menuLabel, ...(on ? menuLabelActive : null) }}>{m.label}</span>
-                      {value && <span style={menuValue}>{value}</span>}
-                    </span>
-                  </button>
-                );
-              })}
+        {/* Left menu */}
+        <s-box padding="small-300" borderWidth="base" borderRadius="base" background="base">
+          <s-stack direction="block" gap="none">
+            {SECTIONS.map((m) => (
+              <button key={m.key} type="button" style={navItemStyle(active === m.key)} onClick={() => setActive(m.key)}>
+                <s-stack direction="inline" gap="small-300" alignItems="center">
+                  <s-icon type={m.icon} />
+                  <s-text>{m.label}</s-text>
+                </s-stack>
+              </button>
+            ))}
+            <div style={{ padding: "8px 10px" }}>
+              <s-link href={DOCS_URL} target="_blank">Read more about Settings</s-link>
             </div>
-          ))}
-        </nav>
+          </s-stack>
+        </s-box>
 
         {/* Active section card */}
         <div style={cardCol}>
@@ -629,34 +585,12 @@ const planGrid = {
   display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "1rem", alignItems: "stretch",
 };
 
-const layout = {
-  display: "grid", gridTemplateColumns: "minmax(160px, 220px) 1fr", gap: "1rem", alignItems: "start",
-};
-// SyncifyPro accent (teal) — distinct from Matrixify's blue-grey.
-const ACCENT = "#0d9488";
-const ACCENT_BG = "#eefaf8";
-
-// Spacing is tuned so adding a section doesn't make the menu taller: with
-// Servers in, 11 items measure ~31.3rem against ~32.9rem for the old 10. Items
-// stay ~41px tall, comfortably clickable; the gap between groups does the
-// grouping, so it can be smaller than the item padding it replaced.
-const menuCol = {
-  display: "flex", flexDirection: "column", gap: ".55rem",
-  border: "1px solid #e1e3e5", borderRadius: 12, padding: ".5rem", background: "#fff",
-};
-const menuGroup = { display: "flex", flexDirection: "column", gap: ".1rem" };
-const menuItem = {
-  display: "flex", alignItems: "center", gap: ".55rem",
-  textAlign: "left", padding: ".3rem .6rem", border: "none",
-  background: "transparent", borderRadius: 8, cursor: "pointer", width: "100%",
-};
-const menuItemActive = { background: ACCENT_BG };
-const menuIcon = { display: "inline-flex", color: "#8a8f96" };
-const menuIconActive = { color: ACCENT };
-const menuText = { display: "flex", flexDirection: "column", lineHeight: 1.2, minWidth: 0 };
-const menuLabel = { fontSize: ".9rem", fontWeight: 500, color: "#303030" };
-const menuLabelActive = { fontWeight: 700, color: ACCENT };
-const menuValue = { fontSize: ".72rem", color: "#8a8f96", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
+const layout = { display: "grid", gridTemplateColumns: "220px 1fr", gap: "16px", alignItems: "start" };
+const navItemStyle = (isActive) => ({
+  display: "block", width: "100%", textAlign: "left", border: "none", font: "inherit", color: "inherit",
+  padding: "8px 10px", borderRadius: "8px", cursor: "pointer",
+  fontWeight: isActive ? 600 : 400, background: isActive ? "#f1f2f4" : "transparent",
+});
 const cardCol = { minWidth: 0 };
 const field = { display: "flex", flexDirection: "column", gap: ".35rem" };
 const input = { padding: ".45rem .6rem", borderRadius: 6, border: "1px solid #c9cccf", fontSize: ".9rem", background: "#fff", maxWidth: 340 };
