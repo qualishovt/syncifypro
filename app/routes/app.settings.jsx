@@ -494,7 +494,7 @@ function ScopesCard({ scopes }) {
 // Shopify App Pricing (Managed Pricing), so every "Choose" button opens
 // Shopify's plan-selection page; the app only reads the active subscription.
 const PLAN_TIERS = [
-  { name: "Basic", price: "Free", cadence: "", features: ["100 rows per export/import job", "All entities and formats", "Saved presets"] },
+  { name: "Basic", price: "Free", cadence: "", features: ["1,000 rows per export/import job", "All entities and formats", "Saved presets"] },
   { name: "Pro", price: "$12", cadence: "/month", popular: true, features: ["10,000 rows per job", "Scheduled exports & imports", "Email / FTP / Drive / S3 delivery", "Migrations from other platforms"] },
   { name: "Max", price: "$40", cadence: "/month", features: ["100,000 rows per job", "Everything in Pro"] },
   { name: "Enterprise", price: "$150", cadence: "/month", features: ["Unlimited rows", "Everything in Max", "Priority support"] },

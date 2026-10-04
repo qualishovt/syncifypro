@@ -5,7 +5,7 @@
  * the Partner dashboard — the app only READS the merchant's active
  * subscription and limits features accordingly:
  *
- *   Basic       — free; imports/exports capped at 100 rows; no schedules or migrations.
+ *   Basic       — free; imports/exports capped at 1,000 rows; no schedules or migrations.
  *   Pro   $12   — 10,000 rows per job; schedules + migrations.
  *   Max   $40   — 100,000 rows per job; schedules + migrations.
  *   Enterprise $150 — unlimited; schedules + migrations.
@@ -37,7 +37,10 @@ const FREE_FOR_ALL = {
 
 // rowLimit: max rows per import/export job; null = unlimited.
 const TIERS = {
-  basic:      { planName: "Basic",      paid: false, rowLimit: 100,     schedules: false, migrations: false },
+  // 1,000 is deliberately enough for a small store to finish a real export and
+  // import it back: a cap that can't complete one whole job teaches a merchant
+  // nothing except that the app stopped. Pro is still 10x this.
+  basic:      { planName: "Basic",      paid: false, rowLimit: 1_000,   schedules: false, migrations: false },
   pro:        { planName: "Pro",        paid: true,  rowLimit: 10_000,  schedules: true,  migrations: true },
   max:        { planName: "Max",        paid: true,  rowLimit: 100_000, schedules: true,  migrations: true },
   enterprise: { planName: "Enterprise", paid: true,  rowLimit: null,    schedules: true,  migrations: true },

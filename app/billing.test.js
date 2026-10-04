@@ -24,6 +24,12 @@ test("no subscription means Basic limits", async () => {
   assert.equal(plan.migrations, false);
 });
 
+test("the free cap fits a whole small-store job, and Pro is still 10x it", () => {
+  // The cap exists to prompt an upgrade, not to stop a merchant mid-job: at
+  // 100 rows nobody ever saw an export finish. Change it on purpose.
+  assert.equal(FREE_ROW_LIMIT, 1_000);
+});
+
 test("an active plan is matched by name, whatever its case", async () => {
   for (const name of ["Pro", "pro", "  PRO  "]) {
     const plan = await getPlan(adminWith(active(name)));
