@@ -652,8 +652,8 @@ const introBody = { fontSize: ".8125rem", color: "#303030", lineHeight: 1.45 };
 const layout = {
   display: "grid", gridTemplateColumns: "minmax(160px, 220px) 1fr", gap: "1rem", alignItems: "start",
 };
-const ACCENT = "#0d9488";
-const ACCENT_BG = "#eefaf8";
+const ACCENT = "#1f8a5b";
+const ACCENT_BG = "#e8f6ee";
 const menuCol = {
   display: "flex", flexDirection: "column", gap: ".9rem",
   border: "1px solid #e1e3e5", borderRadius: 12, padding: ".6rem", background: "#fff",

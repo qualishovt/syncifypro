@@ -40,14 +40,14 @@ export const BASE_CSS = `
   --mk-bg: #fff; --mk-card: #fff; --mk-surface: #fbfcfb; --mk-shade: #f5f8f6; --mk-chip: #f1f5f2;
   --mk-line: #e3ebe6; --mk-track: #eaf0ec; --mk-active: #e9f2ec; --mk-mint: #f2fbf6;
   --mk-ink: #16302a; --mk-body: #5c6b63; --mk-muted: #8fa79b;
-  --mk-green: #45795a; --mk-green-dark: #38634a; --mk-green-soft: #d7ecdf; --mk-green-ink: #1e5136;
+  --mk-green: #1f8a5b; --mk-green-dark: #18714a; --mk-green-soft: #d3efe0; --mk-green-ink: #0f5a39;
   color-scheme: light;
 }
 :root[data-theme="dark"] {
   --mk-bg: #0f1a15; --mk-card: #162420; --mk-surface: #13201b; --mk-shade: #132019; --mk-chip: #1d2d26;
   --mk-line: #25382f; --mk-track: #25382f; --mk-active: #1f3429; --mk-mint: #101d17;
   --mk-ink: #e8f0ec; --mk-body: #a9bbb1; --mk-muted: #7f948a;
-  --mk-green: #5ea67b; --mk-green-dark: #4d8f66; --mk-green-soft: #1f3b2c; --mk-green-ink: #bfe5cd;
+  --mk-green: #3fb47e; --mk-green-dark: #2f9a68; --mk-green-soft: #173a2a; --mk-green-ink: #b5ead0;
   color-scheme: dark;
 }
 .sc-theme { display: inline-flex; border: 1px solid var(--mk-line); border-radius: 999px; padding: 2px; gap: 2px; background: var(--mk-chip); flex: none; }
