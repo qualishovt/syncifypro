@@ -73,6 +73,9 @@ export const MENU_CSS = `
 .sc-menu > button svg { width: 12px; height: 12px; transition: transform .16s ease; }
 .sc-menu[data-open="true"] > button svg { transform: rotate(180deg); }
 .sc-menu-panel { position: absolute; top: calc(100% + 14px); left: 50%; transform: translateX(-50%); min-width: 300px; background: var(--mk-card); border: 1px solid var(--mk-line); border-radius: 14px; box-shadow: 0 22px 48px rgba(13,32,25,.16); padding: .5rem; z-index: 40; }
+/* The panel sits 14px below the button; this invisible strip fills that gap so
+   the pointer stays inside .sc-menu on the way down and mouseleave doesn't fire. */
+.sc-menu-panel::before { content: ""; position: absolute; left: 0; right: 0; top: -16px; height: 16px; }
 .sc-menu-panel a { display: block; padding: .6rem .8rem; border-radius: 9px; text-decoration: none; }
 .sc-menu-panel a:hover { background: var(--mk-mint); }
 .sc-menu-panel strong { display: block; font-size: 15px; font-weight: 700; color: var(--mk-ink); }
