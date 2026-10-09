@@ -19,8 +19,10 @@
 
 /**
  * Kill switch for all plan gating: true hands every shop everything, free.
- * It was on briefly (2026-10-03) to drop the price while the app earned its
- * first installs, and off again the next day.
+ * On since 2026-10-09 while the app earns its first installs. The paid model
+ * it suspends — the tiers below, the Partner-dashboard plan settings and the
+ * listing copy — is recorded in docs/pricing-model.md, with the steps to
+ * bring it back. (It was also on for a day, 2026-10-03.)
  *
  * Both halves have to move together. This flag alone, with the paid plans
  * still live in the Partner dashboard, charges merchants for limits the code
@@ -28,7 +30,7 @@
  * to upgrade. Turning charging off means this true AND the paid plans gone;
  * turning it back on means the plans recreated BEFORE this goes false.
  */
-export const EVERYTHING_FREE = false;
+export const EVERYTHING_FREE = true;
 
 /** What every shop gets while the app is free: all of it. */
 const FREE_FOR_ALL = {
@@ -55,11 +57,20 @@ const PLAN_QUERY = `#graphql
     }
   }`;
 
-/** The merchant's plan, from the live subscription state. Fails closed to Basic. */
+/** The merchant's plan. While EVERYTHING_FREE is on, everything for everyone. */
 export async function getPlan(admin) {
   // Free for everyone: no subscription lookup, so a merchant who never picks
   // a plan is never capped, and nothing depends on the billing API answering.
   if (EVERYTHING_FREE) return { ...FREE_FOR_ALL };
+  return getTieredPlan(admin);
+}
+
+/**
+ * The plan from the live subscription state, as the paid model gates it.
+ * Fails closed to Basic. Kept separate from getPlan so the tiers stay tested
+ * while the app is free, and switching charging back on is one flag.
+ */
+export async function getTieredPlan(admin) {
   try {
     const res = await admin.graphql(PLAN_QUERY);
     const body = await res.json();
