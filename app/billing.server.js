@@ -5,7 +5,7 @@
  * the Partner dashboard — the app only READS the merchant's active
  * subscription and limits features accordingly:
  *
- *   Basic       — free; imports/exports capped at 1,000 rows; no schedules or migrations.
+ *   Basic       — free; imports/exports capped at 100 rows; no schedules or migrations.
  *   Pro   $12   — 10,000 rows per job; schedules + migrations.
  *   Max   $40   — 100,000 rows per job; schedules + migrations.
  *   Enterprise $150 — unlimited; schedules + migrations.
@@ -19,10 +19,9 @@
 
 /**
  * Kill switch for all plan gating: true hands every shop everything, free.
- * On since 2026-10-09 while the app earns its first installs. The paid model
- * it suspends — the tiers below, the Partner-dashboard plan settings and the
- * listing copy — is recorded in docs/pricing-model.md, with the steps to
- * bring it back. (It was also on for a day, 2026-10-03.)
+ * Off: the paid tiers are live. It was on 2026-10-09 → 2026-10-14 (and for a
+ * day on 2026-10-03) to win first installs. docs/pricing-model.md records the
+ * Partner-dashboard plan settings and listing copy, and the order to switch.
  *
  * Both halves have to move together. This flag alone, with the paid plans
  * still live in the Partner dashboard, charges merchants for limits the code
@@ -30,7 +29,7 @@
  * to upgrade. Turning charging off means this true AND the paid plans gone;
  * turning it back on means the plans recreated BEFORE this goes false.
  */
-export const EVERYTHING_FREE = true;
+export const EVERYTHING_FREE = false;
 
 /** What every shop gets while the app is free: all of it. */
 const FREE_FOR_ALL = {
@@ -39,10 +38,9 @@ const FREE_FOR_ALL = {
 
 // rowLimit: max rows per import/export job; null = unlimited.
 const TIERS = {
-  // 1,000 is deliberately enough for a small store to finish a real export and
-  // import it back: a cap that can't complete one whole job teaches a merchant
-  // nothing except that the app stopped. Pro is still 10x this.
-  basic:      { planName: "Basic",      paid: false, rowLimit: 1_000,   schedules: false, migrations: false },
+  // 100 rows (2026-10-14, by request; it was 1,000): enough to try every data
+  // type on a sample, not enough to run a real store on — the upgrade prompt.
+  basic:      { planName: "Basic",      paid: false, rowLimit: 100,     schedules: false, migrations: false },
   pro:        { planName: "Pro",        paid: true,  rowLimit: 10_000,  schedules: true,  migrations: true },
   max:        { planName: "Max",        paid: true,  rowLimit: 100_000, schedules: true,  migrations: true },
   enterprise: { planName: "Enterprise", paid: true,  rowLimit: null,    schedules: true,  migrations: true },

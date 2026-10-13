@@ -1,7 +1,7 @@
 /**
- * Plan gating. The app is free for now (EVERYTHING_FREE), but the paid model
- * is only suspended, so these keep covering what getTieredPlan() makes of the
- * live subscription state — including the two ways it must fail safely: an
+ * Plan gating. The app charges, so these cover what getTieredPlan() (and
+ * getPlan(), which defers to it while EVERYTHING_FREE is off) makes of the live
+ * subscription state — including the two ways it must fail safely: an
  * unrecognised plan name over-delivers, a broken billing API under-delivers.
  */
 import { test } from "node:test";
@@ -25,10 +25,10 @@ test("no subscription means Basic limits", async () => {
   assert.equal(plan.migrations, false);
 });
 
-test("the free cap fits a whole small-store job, and Pro is still 10x it", () => {
-  // The cap exists to prompt an upgrade, not to stop a merchant mid-job: at
-  // 100 rows nobody ever saw an export finish. Change it on purpose.
-  assert.equal(FREE_ROW_LIMIT, 1_000);
+test("the free cap is 100 rows", () => {
+  // Chosen 2026-10-14 (it was 1,000). Change it on purpose, together with the
+  // listing copy and the Settings plan card.
+  assert.equal(FREE_ROW_LIMIT, 100);
 });
 
 test("an active plan is matched by name, whatever its case", async () => {
@@ -64,15 +64,11 @@ test("a billing API failure falls back to Basic instead of taking the app down",
   assert.equal(plan.rowLimit, FREE_ROW_LIMIT);
 });
 
-test("the app is free: every shop gets everything, whatever it subscribed to", async () => {
-  // Flipping this back means recreating the paid plans in the Partner
-  // dashboard FIRST — see docs/pricing-model.md. Paid plans plus a
-  // free-for-all flag bills merchants for nothing.
-  assert.equal(EVERYTHING_FREE, true);
-  for (const subs of [[], active("Pro")]) {
-    const plan = await getPlan(adminWith(subs));
-    assert.equal(plan.rowLimit, null);
-    assert.equal(plan.schedules, true);
-    assert.equal(plan.migrations, true);
-  }
+test("charging is on: getPlan follows the subscription", async () => {
+  // Setting the flag back to true means deleting the paid plans in the Partner
+  // dashboard in the same change — see docs/pricing-model.md. Paid plans plus
+  // a free-for-all flag bills merchants for nothing.
+  assert.equal(EVERYTHING_FREE, false);
+  assert.equal((await getPlan(adminWith([]))).rowLimit, FREE_ROW_LIMIT);
+  assert.equal((await getPlan(adminWith(active("Pro")))).rowLimit, 10_000);
 });
